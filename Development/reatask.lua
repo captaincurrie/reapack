@@ -1,6 +1,3 @@
--- =====================
--- PROGRAM SPECIFICATION
--- =====================
 -- @description reatask - reaper task manager
 -- @author captaincurrie
 -- @version 1.1
