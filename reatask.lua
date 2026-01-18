@@ -1,38 +1,37 @@
---[[
-@description reatask - reaper task manager
-@version 1.1
-@author captaincurrie
-@date 2025 12 28
-@about
-The intention of this program is to create a task manager for the DAW Reaper.
+-- @description reatask - reaper task manager
+-- @version 1.1
+-- @author captaincurrie
+-- @date 2025 12 28
+-- @about
+-- The intention of this program is to create a task manager for the DAW Reaper.
+-- 
+-- - Create a GUI that organizes all important information and operations
+-- in as simple a manner as possible.
+-- - The GUI must be able to do the following:
+-- 	- create a list of tasks
+-- 	- create sub-tasks of potentially infinite depth
+-- 	- tasks with subtasks can be collapsed so only the parent is shown
+-- 	- undo/redo each and every operation
+-- 	- be dockable within reaper
+-- - The task list can be optionally defined to be per-project, per-project-version, per-selected-track per-selected-item
+-- - The task list will be context-dependent based on current user action
+-- 	- when a task is selected, if a task list for that track exist, display it
+-- 	- when a item is selected, if a task list for that item exists, display it
+-- 	- if nothing else, display the project task list
+-- - There is an input bar at the bottom of the task list
+-- 	- this bar will take all keyboard input for the window so that you dont need to
+-- worry about clicking the input bar before you type into it. As long as reatask is the focused window, just start typing and press enter to create a task
+-- 
+-- INTERFACE:
+-- - middle clicking a task will delete it
+-- - right clicking anywhere on the task list will open a settings menu
+-- - right clicking on the input bar will perform an undo
+-- - shift+right click will perform a redo
+-- - double clicking a task will collapse/expand its children (if they exist)
+-- - pressing enter will take the current text in the input bar and create a sibling task
+-- - pressing Tab will take the current text in the input bar and create a child task
+-- - Pressing Shift+Tab will take the current text in the input bar and create a parent task
 
-- Create a GUI that organizes all important information and operations
-in as simple a manner as possible.
-- The GUI must be able to do the following:
-	- create a list of tasks
-	- create sub-tasks of potentially infinite depth
-	- tasks with subtasks can be collapsed so only the parent is shown
-	- undo/redo each and every operation
-	- be dockable within reaper
-- The task list can be optionally defined to be per-project, per-project-version, per-selected-track per-selected-item
-- The task list will be context-dependent based on current user action
-	- when a task is selected, if a task list for that track exist, display it
-	- when a item is selected, if a task list for that item exists, display it
-	- if nothing else, display the project task list
-- There is an input bar at the bottom of the task list
-	- this bar will take all keyboard input for the window so that you dont need to
-worry about clicking the input bar before you type into it. As long as reatask is the focused window, just start typing and press enter to create a task
-
-INTERFACE:
-- middle clicking a task will delete it
-- right clicking anywhere on the task list will open a settings menu
-- right clicking on the input bar will perform an undo
-- shift+right click will perform a redo
-- double clicking a task will collapse/expand its children (if they exist)
-- pressing enter will take the current text in the input bar and create a sibling task
-- pressing Tab will take the current text in the input bar and create a child task
-- Pressing Shift+Tab will take the current text in the input bar and create a parent task
---]]
 
 local r = reaper
 
