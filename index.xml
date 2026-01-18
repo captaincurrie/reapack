@@ -1,2 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie"/>
+<index version="1" name="CaptainCurrie" commit="72610b8b33d26a696936a0624ca7b7c91e41dc82">
+  <category name="Development">
+    <reapack name="reatask.lua" type="script" desc="reatask - reaper task manager">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 reatask - reaper task manager\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.1" author="captaincurrie" time="2026-01-18T22:21:03Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/72610b8b33d26a696936a0624ca7b7c91e41dc82/Development/reatask.lua</source>
+      </version>
+    </reapack>
+  </category>
+</index>
