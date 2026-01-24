@@ -90,13 +90,22 @@ local collapse_icon_y_offset = base_collapse_icon_y_offset
 -- Display settings
 local show_completed = true
 local sort_mode = "custom" -- "custom" or "alphabetical"
+local wrap_task_text = false -- Whether to wrap long task text
 
--- Right-click menu
-local menu_open = false
-local menu_x = 0
-local menu_y = 0
-local menu_items = {}
-local submenu_open = false
+-- Color settings
+local bg_color = "3e3e3e" -- Hex color format for main background
+local text_color = "FFFFFF" -- Hex color format for main text
+local input_bar_bg_color = "3e3e3e" -- Hex color format for input bar
+local input_bar_border_color = "606060" -- Hex color format for input bar border
+local input_bar_border_thickness = 2 -- Thickness of input bar border in pixels
+
+-- View state
+local current_view = "tasks" -- "tasks" or "settings"
+local settings_scroll_offset = 0
+
+-- Settings view interaction
+local font_slider_dragging = false
+local font_slider_value = 0 -- 0-1 range
 
 -- Undo system
 local undo_stack = {}
@@ -205,6 +214,27 @@ function should_reload_project()
 
 	local proj_id = get_project_identifier()
 	return proj_id ~= current_project_path
+end
+
+function hex_to_rgb(hex)
+	-- Remove # if present
+	hex = hex:gsub("#", "")
+	
+	-- Handle 3-digit hex codes (e.g., #RGB -> #RRGGBB)
+	if #hex == 3 then
+		hex = hex:sub(1,1):rep(2) .. hex:sub(2,2):rep(2) .. hex:sub(3,3):rep(2)
+	end
+	
+	-- Parse hex values
+	if #hex == 6 then
+		local r = tonumber(hex:sub(1, 2), 16) / 255
+		local g = tonumber(hex:sub(3, 4), 16) / 255
+		local b = tonumber(hex:sub(5, 6), 16) / 255
+		return r, g, b
+	end
+	
+	-- Default to gray if parsing fails
+	return 0.4, 0.4, 0.4
 end
 
 function calculate_scale_factor()
@@ -316,6 +346,18 @@ function load_settings()
 					elseif key == "target_fps" then
 						target_fps = tonumber(value) or 30
 						frame_time = target_fps > 0 and (1.0 / target_fps) or 0
+					elseif key == "bg_color" then
+						bg_color = value
+					elseif key == "text_color" then
+						text_color = value
+					elseif key == "input_bar_bg_color" then
+						input_bar_bg_color = value
+					elseif key == "input_bar_border_color" then
+						input_bar_border_color = value
+					elseif key == "input_bar_border_thickness" then
+						input_bar_border_thickness = tonumber(value) or 2
+					elseif key == "wrap_task_text" then
+						wrap_task_text = value == "true"
 					end
 				end
 			end
@@ -339,6 +381,12 @@ function save_settings()
 		file:write(string.format("show_completed:%s\n", tostring(show_completed)))
 		file:write(string.format("sort_mode:%s\n", sort_mode))
 		file:write(string.format("target_fps:%d\n", target_fps))
+		file:write(string.format("bg_color:%s\n", bg_color))
+		file:write(string.format("text_color:%s\n", text_color))
+		file:write(string.format("input_bar_bg_color:%s\n", input_bar_bg_color))
+		file:write(string.format("input_bar_border_color:%s\n", input_bar_border_color))
+		file:write(string.format("input_bar_border_thickness:%d\n", input_bar_border_thickness))
+		file:write(string.format("wrap_task_text:%s\n", tostring(wrap_task_text)))
 		file:close()
 	end
 end
@@ -461,6 +509,74 @@ function sort_children_by_order(children_list)
 	end)
 end
 
+function wrap_text(text, max_width)
+	local lines = {}
+	local words = {}
+	
+	-- Split text into words
+	for word in text:gmatch("%S+") do
+		table.insert(words, word)
+	end
+	
+	if #words == 0 then
+		return {text}
+	end
+	
+	local current_line = ""
+	for _, word in ipairs(words) do
+		local test_line = current_line == "" and word or (current_line .. " " .. word)
+		local w = gfx.measurestr(test_line)
+		
+		if w > max_width and max_width > 0 then
+			if current_line ~= "" then
+				table.insert(lines, current_line)
+				current_line = word
+			else
+				-- Single word is too long, just add it
+				table.insert(lines, word)
+				current_line = ""
+			end
+		else
+			current_line = test_line
+		end
+	end
+	
+	if current_line ~= "" then
+		table.insert(lines, current_line)
+	end
+	
+	if #lines == 0 then
+		table.insert(lines, text)
+	end
+	
+	return lines
+end
+
+function get_item_display_height(item, level)
+	if not wrap_task_text then
+		return item_height
+	end
+	
+	-- Calculate available width for text
+	local x_offset = 10 + (level * indent_size)
+	local has_children = #item.children > 0
+	local text_x_offset_with_icon = math.floor(checkbox_size * 2.33 + 0.5)
+	local text_x_offset_no_icon = math.floor(checkbox_size * 1.67 + 0.5)
+	local text_x_offset = has_children and text_x_offset_with_icon or text_x_offset_no_icon
+	local available_width = gfx.w - x_offset - text_x_offset - 10
+	
+	if available_width <= 0 then
+		return item_height
+	end
+	
+	local lines = wrap_text(item.text, available_width)
+	local line_height = font_size + 2
+	local text_height = #lines * line_height
+	
+	-- Return the maximum of base item height and wrapped text height
+	return math.max(item_height, text_height + 8)
+end
+
 function get_display_list()
 	if not cache_dirty and display_list_cache then
 		return display_list_cache
@@ -476,10 +592,13 @@ function get_display_list()
 				return
 			end
 
+			local display_height = get_item_display_height(item, level)
+			
 			table.insert(display_list_cache, {
 				id = item_id,
 				item = item,
 				level = level,
+				height = display_height,
 			})
 
 			-- Add children only if not collapsed
@@ -525,8 +644,55 @@ end
 
 function get_scroll_limits(display_list)
 	local available_height = gfx.h - input_height - 20 -- Account for margins and input bar
-	local total_content_height = #display_list * item_height
+	
+	-- Calculate total content height based on actual item heights
+	local total_content_height = 0
+	for _, display_item in ipairs(display_list) do
+		total_content_height = total_content_height + display_item.height
+	end
+	
 	local max_scroll = math.max(0, total_content_height - available_height)
+	return max_scroll
+end
+
+function get_settings_scroll_limits()
+	-- Calculate total height of settings content
+	local margin = 20
+	local y_offset = margin
+	
+	-- Title
+	gfx.setfont(1, font_name, font_size * 1.5)
+	local title_w, title_h = gfx.measurestr("Settings")
+	y_offset = y_offset + title_h + margin
+	set_font()
+	
+	local label_height = font_size + 5
+	local button_height = math.max(30, font_size * 1.5)
+	local slider_height = math.max(20, font_size * 1.2)
+	local section_spacing = margin
+	
+	-- Font Size Section
+	y_offset = y_offset + label_height + slider_height + section_spacing
+	
+	-- FPS Section
+	y_offset = y_offset + label_height + button_height + section_spacing
+	
+	-- Sort Section
+	y_offset = y_offset + label_height + button_height + section_spacing
+	
+	-- Display Section
+	y_offset = y_offset + label_height + button_height + 10 + button_height + section_spacing
+	
+	-- Undo Section (if available)
+	if #undo_stack > 0 then
+		y_offset = y_offset + label_height + button_height + section_spacing
+	end
+	
+	-- Quit button
+	y_offset = y_offset + button_height + margin
+	
+	local total_content_height = y_offset
+	local max_scroll = math.max(0, total_content_height - gfx.h)
 	return max_scroll
 end
 
@@ -699,22 +865,23 @@ function get_drop_target(mouse_y, display_list)
 
 	for i, display_item in ipairs(display_list) do
 		local item_top = item_y
-		local item_bottom = item_y + item_height
+		local current_height = display_item.height
+		local item_bottom = item_y + current_height
 
 		if mouse_y >= item_top and mouse_y <= item_bottom then
 			local relative_y = mouse_y - item_top
-			local threshold = item_height * drop_zone_threshold
+			local threshold = current_height * drop_zone_threshold
 
 			if relative_y < threshold then
 				return { id = display_item.id, position = "before", level = display_item.level }
-			elseif relative_y > item_height - threshold then
+			elseif relative_y > current_height - threshold then
 				return { id = display_item.id, position = "after", level = display_item.level }
 			else
 				return { id = display_item.id, position = "child", level = display_item.level + 1 }
 			end
 		end
 
-		item_y = item_y + item_height
+		item_y = item_y + current_height
 	end
 
 	return nil
@@ -725,7 +892,8 @@ function get_item_at_position(mouse_x, mouse_y, display_list)
 
 	for i, display_item in ipairs(display_list) do
 		local item_top = item_y
-		local item_bottom = item_y + item_height
+		local current_height = display_item.height
+		local item_bottom = item_y + current_height
 
 		if mouse_y >= item_top and mouse_y <= item_bottom then
 			local x_offset = 10 + (display_item.level * indent_size)
@@ -748,7 +916,7 @@ function get_item_at_position(mouse_x, mouse_y, display_list)
 			return click_info
 		end
 
-		item_y = item_y + item_height
+		item_y = item_y + current_height
 	end
 
 	return nil
@@ -766,196 +934,404 @@ function toggle_dock()
 	end
 end
 
-function show_context_menu(x, y)
-	menu_open = true
-	submenu_open = false
-	menu_x = x
-	menu_y = y
-
-	menu_items = {
-		{
-			text = show_completed and "Hide Completed" or "Show Completed",
-			action = function()
-				-- Preserve selection when toggling completed visibility
-				local preserved_selection = selected_id
-				save_state_for_undo("Toggle show completed")
-				show_completed = not show_completed
-				mark_cache_dirty()
-
-				-- Restore selection if the task still exists and is visible
-				if preserved_selection and todo_items[preserved_selection] then
-					if show_completed or not todo_items[preserved_selection].done then
-						selected_id = preserved_selection
-					end
-				end
-
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-		},
-		{
-			text = "Font Size +",
-			action = function()
-				font_size = math.min(font_size + font_size_increment, 48)
-				set_font()
-				mark_cache_dirty() -- Force recalculation of display list
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-		},
-		{
-			text = "Font Size -",
-			action = function()
-				font_size = math.max(font_size - font_size_increment, 8)
-				set_font()
-				mark_cache_dirty() -- Force recalculation of display list
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-		},
-		{
-			text = "Sort Custom",
-			action = function()
-				save_state_for_undo("Sort custom")
-				sort_mode = "custom"
-				mark_cache_dirty()
-				save_settings_deferred()
-			end,
-		},
-		{
-			text = "Sort Alphabetical",
-			action = function()
-				save_state_for_undo("Sort alphabetical")
-				sort_mode = "alphabetical"
-				mark_cache_dirty()
-				save_settings_deferred()
-			end,
-		},
-		{
-			text = is_docked() and "Undock" or "Dock", -- Dynamic text based on current state
-			action = function()
-				toggle_dock()
-				request_immediate_update()
-			end,
-		},
-		{
-			text = "Quit",
-			action = function()
-				save_todo_data()
-				save_settings()
-				gfx.quit()
-			end,
-		},
-		{
-			text = #undo_stack > 0 and ("Undo: " .. undo_stack[#undo_stack].action) or "Nothing to Undo",
-			action = function()
-				if #undo_stack > 0 then
-					undo_last_action()
-					request_immediate_update()
-				end
-			end,
-			enabled = #undo_stack > 0,
-		},
-		{
-			text = "FPS: " .. target_fps,
-			submenu = true,
-		},
-		{
-			text = "  Set FPS: 15",
-			action = function()
-				target_fps = 15
-				frame_time = 1.0 / target_fps
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-			indent = true,
-		},
-		{
-			text = "  Set FPS: 30",
-			action = function()
-				target_fps = 30
-				frame_time = 1.0 / target_fps
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-			indent = true,
-		},
-		{
-			text = "  Set FPS: 60",
-			action = function()
-				target_fps = 60
-				frame_time = 1.0 / target_fps
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-			indent = true,
-		},
-		{
-			text = "  Set FPS: Unlimited",
-			action = function()
-				target_fps = 0 -- 0 means unlimited
-				frame_time = 0
-				save_settings_deferred()
-				request_immediate_update()
-			end,
-			indent = true,
-		},
-	}
+function draw_button(x, y, w, h, text, is_active, mouse_over)
+	-- Draw button background
+	if is_active then
+		gfx.set(0.2, 0.5, 0.2, 1) -- Green for active
+	elseif mouse_over then
+		gfx.set(0.5, 0.5, 0.6, 1) -- Lighter for hover
+	else
+		gfx.set(0.3, 0.3, 0.4, 1) -- Default
+	end
+	gfx.rect(x, y, w, h)
+	
+	-- Draw button border
+	gfx.set(0.6, 0.6, 0.6, 1)
+	gfx.rect(x, y, w, 1)
+	gfx.rect(x, y, 1, h)
+	gfx.rect(x + w - 1, y, 1, h)
+	gfx.rect(x, y + h - 1, w, 1)
+	
+	-- Draw text centered with clipping
+	local text_r, text_g, text_b = hex_to_rgb(text_color)
+	gfx.set(text_r, text_g, text_b, 1)
+	local text_w, text_h = gfx.measurestr(text)
+	local padding = 4
+	local available_width = w - padding * 2
+	
+	-- Truncate text if it's too wide
+	local display_text = text
+	if text_w > available_width then
+		-- Binary search for the right length
+		local left, right = 1, #text
+		while left < right do
+			local mid = math.floor((left + right + 1) / 2)
+			local test_text = text:sub(1, mid) .. "..."
+			local test_w = gfx.measurestr(test_text)
+			if test_w <= available_width then
+				left = mid
+			else
+				right = mid - 1
+			end
+		end
+		display_text = text:sub(1, left) .. "..."
+		text_w = gfx.measurestr(display_text)
+	end
+	
+	gfx.x = x + (w - text_w) / 2
+	gfx.y = y + (h - text_h) / 2
+	gfx.drawstr(display_text)
 end
 
-function draw_menu()
-	if not menu_open then
+function draw_settings_view()
+	local bg_r, bg_g, bg_b = hex_to_rgb(bg_color)
+	gfx.set(bg_r, bg_g, bg_b, 1)
+	gfx.rect(0, 0, gfx.w, gfx.h)
+	
+	local text_r, text_g, text_b = hex_to_rgb(text_color)
+	local margin = 20
+	local y_offset = margin - settings_scroll_offset
+	local content_width = gfx.w - margin * 2
+	
+	-- Title
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.setfont(1, font_name, font_size * 1.5)
+	local title = "Settings"
+	local title_w, title_h = gfx.measurestr(title)
+	gfx.x = (gfx.w - title_w) / 2
+	gfx.y = y_offset
+	gfx.drawstr(title)
+	y_offset = y_offset + title_h + margin
+	
+	-- Reset font
+	set_font()
+	
+	local label_height = font_size + 5
+	local button_height = math.max(30, font_size * 1.5)
+	local slider_height = math.max(20, font_size * 1.2)
+	local section_spacing = margin
+	
+	-- Font Size Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Font Size: " .. font_size)
+	y_offset = y_offset + label_height
+	
+	-- Font size slider
+	local slider_x = margin
+	local slider_y = y_offset
+	local slider_w = content_width
+	local slider_h = slider_height
+	
+	-- Slider background
+	gfx.set(0.2, 0.2, 0.2, 1)
+	gfx.rect(slider_x, slider_y, slider_w, slider_h)
+	
+	-- Slider border
+	gfx.set(0.6, 0.6, 0.6, 1)
+	gfx.rect(slider_x, slider_y, slider_w, 1)
+	gfx.rect(slider_x, slider_y, 1, slider_h)
+	gfx.rect(slider_x + slider_w - 1, slider_y, 1, slider_h)
+	gfx.rect(slider_x, slider_y + slider_h - 1, slider_w, 1)
+	
+	-- Slider value (8-48 range)
+	local font_min = 8
+	local font_max = 48
+	font_slider_value = (font_size - font_min) / (font_max - font_min)
+	local handle_x = slider_x + (slider_w - 10) * font_slider_value
+	
+	-- Slider fill
+	gfx.set(0.4, 0.4, 0.6, 1)
+	gfx.rect(slider_x + 2, slider_y + 2, handle_x - slider_x, slider_h - 4)
+	
+	-- Slider handle
+	gfx.set(0.7, 0.7, 0.8, 1)
+	gfx.rect(handle_x, slider_y, 10, slider_h)
+	
+	y_offset = y_offset + slider_h + section_spacing
+	
+	-- FPS Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Frame Rate Limit:")
+	y_offset = y_offset + label_height
+	
+	-- FPS buttons in a row
+	local button_spacing = 10
+	local num_fps_buttons = 4
+	local button_w = (content_width - button_spacing * (num_fps_buttons - 1)) / num_fps_buttons
+	local fps_values = {15, 30, 60, 0}
+	local fps_labels = {"15", "30", "60", "∞"}
+	
+	for i = 1, num_fps_buttons do
+		local btn_x = margin + (i - 1) * (button_w + button_spacing)
+		local is_active = (target_fps == fps_values[i])
+		local mouse_over = gfx.mouse_x >= btn_x and gfx.mouse_x <= btn_x + button_w
+			and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+		
+		draw_button(btn_x, y_offset, button_w, button_height, fps_labels[i], is_active, mouse_over)
+	end
+	
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Sort Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Sort Order:")
+	y_offset = y_offset + label_height
+	
+	-- Sort buttons
+	local sort_button_w = (content_width - button_spacing) / 2
+	local sort_modes = {"custom", "alphabetical"}
+	local sort_labels = {"User", "Alphabetical"}
+	
+	for i = 1, 2 do
+		local btn_x = margin + (i - 1) * (sort_button_w + button_spacing)
+		local is_active = (sort_mode == sort_modes[i])
+		local mouse_over = gfx.mouse_x >= btn_x and gfx.mouse_x <= btn_x + sort_button_w
+			and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+		
+		draw_button(btn_x, y_offset, sort_button_w, button_height, sort_labels[i], is_active, mouse_over)
+	end
+	
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Other Settings Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Display:")
+	y_offset = y_offset + label_height
+	
+	-- Show/Hide completed button
+	local toggle_text = show_completed and "Hide Completed" or "Show Completed"
+	local mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
+		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+	draw_button(margin, y_offset, content_width, button_height, toggle_text, false, mouse_over)
+	y_offset = y_offset + button_height + button_spacing
+	
+	-- Text wrap button
+	local wrap_text = wrap_task_text and "Disable Text Wrap" or "Enable Text Wrap"
+	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
+		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+	draw_button(margin, y_offset, content_width, button_height, wrap_text, false, mouse_over)
+	y_offset = y_offset + button_height + button_spacing
+	
+	-- Dock/Undock button
+	local dock_text = is_docked() and "Undock Window" or "Dock Window"
+	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
+		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+	draw_button(margin, y_offset, content_width, button_height, dock_text, false, mouse_over)
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Undo info
+	if #undo_stack > 0 then
+		gfx.set(text_r, text_g, text_b, 1)
+		gfx.x = margin
+		gfx.y = y_offset
+		gfx.drawstr("Last Action: " .. undo_stack[#undo_stack].action)
+		y_offset = y_offset + label_height
+		
+		-- Undo button
+		mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
+			and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+		draw_button(margin, y_offset, content_width, button_height, "Undo", false, mouse_over)
+		y_offset = y_offset + button_height + section_spacing
+	end
+	
+	-- Quit button (full width)
+	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
+		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+	draw_button(margin, y_offset, content_width, button_height, "Quit", false, mouse_over)
+end
+
+function handle_settings_mouse()
+	local mouse_cap = gfx.mouse_cap
+	local mouse_x = gfx.mouse_x
+	local mouse_y = gfx.mouse_y
+	
+	-- Handle mouse wheel scrolling
+	if gfx.mouse_wheel ~= 0 then
+		local max_scroll = get_settings_scroll_limits()
+		local scroll_amount = gfx.mouse_wheel > 0 and -30 or 30
+		settings_scroll_offset = math.max(0, math.min(settings_scroll_offset + scroll_amount, max_scroll))
+		gfx.mouse_wheel = 0
+		request_immediate_update()
+	end
+	
+	-- Handle right click to go back to tasks view (check BEFORE any button processing)
+	if mouse_cap & 2 == 2 and last_mouse_cap & 2 == 0 then -- Right click
+		current_view = "tasks"
+		settings_scroll_offset = 0 -- Reset scroll when leaving settings
+		request_immediate_update()
 		return
 	end
-
-	local menu_height = #menu_items * menu_item_height
-
-	-- Adjust menu position to stay on screen
-	local adj_x = math.min(menu_x, gfx.w - menu_width)
-	local adj_y = math.min(menu_y, gfx.h - menu_height)
-
-	-- Draw menu background
-	gfx.set(0.3, 0.3, 0.3, 1)
-	gfx.rect(adj_x, adj_y, menu_width, menu_height)
-
-	-- Draw menu border
-	gfx.set(0.6, 0.6, 0.6, 1)
-	gfx.rect(adj_x, adj_y, menu_width, 1)
-	gfx.rect(adj_x, adj_y, 1, menu_height)
-	gfx.rect(adj_x + menu_width - 1, adj_y, 1, menu_height)
-	gfx.rect(adj_x, adj_y + menu_height - 1, menu_width, 1)
-
-	-- Draw menu items
-	for i, menu_item in ipairs(menu_items) do
-		local item_y = adj_y + (i - 1) * menu_item_height
-		local is_enabled = menu_item.enabled == nil or menu_item.enabled
-
-		-- Check if mouse is over this item
-		local mouse_over = gfx.mouse_x >= adj_x
-			and gfx.mouse_x <= adj_x + menu_width
-			and gfx.mouse_y >= item_y
-			and gfx.mouse_y <= item_y + menu_item_height
-
-		if mouse_over and is_enabled then
-			gfx.set(0.4, 0.4, 0.5, 1)
-			gfx.rect(adj_x, item_y, menu_width, menu_item_height)
+	
+	local margin = 20
+	local content_width = gfx.w - margin * 2
+	local y_offset = margin - settings_scroll_offset
+	
+	-- Skip title
+	gfx.setfont(1, font_name, font_size * 1.5)
+	local title_w, title_h = gfx.measurestr("Settings")
+	y_offset = y_offset + title_h + margin
+	set_font()
+	
+	local label_height = font_size + 5
+	local button_height = math.max(30, font_size * 1.5)
+	local slider_height = math.max(20, font_size * 1.2)
+	local section_spacing = margin
+	
+	-- Skip font size label
+	y_offset = y_offset + label_height
+	
+	-- Font slider interaction
+	local slider_x = margin
+	local slider_y = y_offset
+	local slider_w = content_width
+	local slider_h = slider_height
+	
+	if mouse_cap & 1 == 1 then -- Left mouse down
+		if mouse_x >= slider_x and mouse_x <= slider_x + slider_w
+			and mouse_y >= slider_y and mouse_y <= slider_y + slider_h then
+			font_slider_dragging = true
 		end
-
-		-- Highlight current sorting mode
-		local text_color = is_enabled and 0.9 or 0.5
-		if
-			(menu_item.text == "Sort Custom" and sort_mode == "custom")
-			or (menu_item.text == "Sort Alphabetical" and sort_mode == "alphabetical")
-		then
-			text_color = 1.0
-			gfx.set(0.2, 0.4, 0.2, 1)
-			gfx.rect(adj_x + 2, item_y + 2, menu_width - 4, menu_item_height - 4)
+		
+		if font_slider_dragging then
+			local new_value = (mouse_x - slider_x) / slider_w
+			new_value = math.max(0, math.min(1, new_value))
+			local font_min = 8
+			local font_max = 48
+			local new_font_size = math.floor(font_min + new_value * (font_max - font_min) + 0.5)
+			if new_font_size ~= font_size then
+				font_size = new_font_size
+				set_font()
+				mark_cache_dirty()
+				save_settings_deferred()
+				request_immediate_update()
+			end
 		end
-
-		gfx.set(text_color, text_color, text_color, 1)
-		gfx.x = adj_x + 5
-		gfx.y = item_y + menu_text_y_offset
-		gfx.drawstr(menu_item.text)
+	else
+		font_slider_dragging = false
+	end
+	
+	y_offset = y_offset + slider_h + section_spacing
+	
+	-- Skip FPS label
+	y_offset = y_offset + label_height
+	
+	-- FPS button clicks
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then -- Click (not held)
+		local button_spacing = 10
+		local num_fps_buttons = 4
+		local button_w = (content_width - button_spacing * (num_fps_buttons - 1)) / num_fps_buttons
+		local fps_values = {15, 30, 60, 0}
+		
+		for i = 1, num_fps_buttons do
+			local btn_x = margin + (i - 1) * (button_w + button_spacing)
+			if mouse_x >= btn_x and mouse_x <= btn_x + button_w
+				and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+				target_fps = fps_values[i]
+				frame_time = target_fps > 0 and (1.0 / target_fps) or 0
+				save_settings_deferred()
+				request_immediate_update()
+			end
+		end
+	end
+	
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Skip sort label
+	y_offset = y_offset + label_height
+	
+	-- Sort button clicks
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		local sort_button_w = (content_width - 10) / 2
+		local sort_modes = {"custom", "alphabetical"}
+		
+		for i = 1, 2 do
+			local btn_x = margin + (i - 1) * (sort_button_w + 10)
+			if mouse_x >= btn_x and mouse_x <= btn_x + sort_button_w
+				and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+				save_state_for_undo("Sort " .. sort_modes[i])
+				sort_mode = sort_modes[i]
+				mark_cache_dirty()
+				save_settings_deferred()
+				request_immediate_update()
+			end
+		end
+	end
+	
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Skip display label
+	y_offset = y_offset + label_height
+	
+	-- Show/Hide completed button
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		if mouse_x >= margin and mouse_x <= margin + content_width
+			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+			local preserved_selection = selected_id
+			save_state_for_undo("Toggle show completed")
+			show_completed = not show_completed
+			mark_cache_dirty()
+			if preserved_selection and todo_items[preserved_selection] then
+				if show_completed or not todo_items[preserved_selection].done then
+					selected_id = preserved_selection
+				end
+			end
+			save_settings_deferred()
+			request_immediate_update()
+		end
+	end
+	y_offset = y_offset + button_height + 10
+	
+	-- Text wrap button
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		if mouse_x >= margin and mouse_x <= margin + content_width
+			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+			save_state_for_undo("Toggle text wrap")
+			wrap_task_text = not wrap_task_text
+			mark_cache_dirty()
+			save_settings_deferred()
+			request_immediate_update()
+		end
+	end
+	y_offset = y_offset + button_height + 10
+	
+	-- Dock/Undock button
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		if mouse_x >= margin and mouse_x <= margin + content_width
+			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+			toggle_dock()
+			request_immediate_update()
+		end
+	end
+	y_offset = y_offset + button_height + section_spacing
+	
+	-- Undo button (if available)
+	if #undo_stack > 0 then
+		y_offset = y_offset + label_height
+		if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+			if mouse_x >= margin and mouse_x <= margin + content_width
+				and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+				undo_last_action()
+				request_immediate_update()
+			end
+		end
+	end
+	
+	-- Quit button (full width)
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		if mouse_x >= margin and mouse_x <= margin + content_width
+			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+			save_todo_data()
+			save_settings()
+			gfx.quit()
+		end
 	end
 end
 
@@ -1130,11 +1506,17 @@ function draw_collapse_icon(x, y, collapsed)
 end
 
 function draw_gui()
-	-- Clear background
-	gfx.set(0.2, 0.2, 0.2, 1)
-	gfx.rect(0, 0, gfx.w, gfx.h)
-
 	needs_redraw = false -- Reset redraw flag
+	
+	if current_view == "settings" then
+		draw_settings_view()
+		return
+	end
+	
+	-- Clear background
+	local bg_r, bg_g, bg_b = hex_to_rgb(bg_color)
+	gfx.set(bg_r, bg_g, bg_b, 1)
+	gfx.rect(0, 0, gfx.w, gfx.h)
 
 	local display_list = get_display_list()
 	local y = 10 - scroll_offset
@@ -1145,6 +1527,8 @@ function draw_gui()
 
 		for _, display_item in ipairs(display_list) do
 			if display_item.id == drop_target.id then
+				local current_height = display_item.height
+				
 				if drop_target.position == "before" or drop_target.position == "after" then
 					-- Blue color for sibling operations
 					gfx.set(0.2, 0.5, 1, 0.8)
@@ -1153,16 +1537,16 @@ function draw_gui()
 					local x_indent = 10 + (display_item.level * indent_size)
 
 					-- Draw horizontal drop line
-					local line_y = drop_target.position == "before" and (temp_y - 1) or (temp_y + item_height - 1)
+					local line_y = drop_target.position == "before" and (temp_y - 1) or (temp_y + current_height - 1)
 					gfx.rect(x_indent, line_y, gfx.w - x_indent, 2)
 
 					-- Draw vertical connecting line showing hierarchy
 					if drop_target.position == "after" then
 						-- Vertical line from top of task down to drop line
-						gfx.rect(x_indent, temp_y, 2, item_height)
+						gfx.rect(x_indent, temp_y, 2, current_height)
 					else -- before
 						-- Vertical line from drop line down through task
-						gfx.rect(x_indent, line_y, 2, item_height)
+						gfx.rect(x_indent, line_y, 2, current_height)
 					end
 				else -- child
 					-- Orange highlight for child operation
@@ -1171,12 +1555,12 @@ function draw_gui()
 						10 + (display_item.level * indent_size),
 						temp_y,
 						gfx.w - 20 - (display_item.level * indent_size),
-						item_height
+						current_height
 					)
 				end
 				break
 			end
-			temp_y = temp_y + item_height
+			temp_y = temp_y + display_item.height
 		end
 	end
 
@@ -1184,14 +1568,15 @@ function draw_gui()
 	for i, display_item in ipairs(display_list) do
 		local item = display_item.item
 		local level = display_item.level
+		local current_height = display_item.height
 		local x = 10 + (level * indent_size)
 
 		-- Skip if outside visible area, or if it's the item being dragged
-		if y > -item_height and y < gfx.h - input_height and display_item.id ~= drag_item_id then
+		if y > -current_height and y < gfx.h - input_height and display_item.id ~= drag_item_id then
 			-- Selection highlight
 			if display_item.id == selected_id then
 				gfx.set(0.3, 0.3, 0.5, 1)
-				gfx.rect(0, y, gfx.w, item_height)
+				gfx.rect(0, y, gfx.w, current_height)
 			end
 
 			-- Show drag preparation highlight
@@ -1199,7 +1584,7 @@ function draw_gui()
 				local hold_time = r.time_precise() - mouse_down_time
 				if hold_time > click_threshold_time then
 					gfx.set(0.5, 0.3, 0.1, 0.3)
-					gfx.rect(0, y, gfx.w, item_height)
+					gfx.rect(0, y, gfx.w, current_height)
 				end
 			end
 
@@ -1234,13 +1619,31 @@ function draw_gui()
 
 			-- Text (adjust position based on whether there's a collapse icon)
 			local text_x = has_children and (x + text_x_offset_with_icon) or (x + text_x_offset_no_icon)
-			gfx.set(is_grayed and 0.5 or 0.9, is_grayed and 0.5 or 0.9, is_grayed and 0.5 or 0.9, 1)
-			gfx.x = text_x
-			gfx.y = y + task_text_y_offset
-			gfx.drawstr(item.text)
+			local text_r, text_g, text_b = hex_to_rgb(text_color)
+			local brightness = is_grayed and 0.5 or 1.0
+			gfx.set(text_r * brightness, text_g * brightness, text_b * brightness, 1)
+			
+			-- Draw text with wrapping if enabled
+			if wrap_task_text then
+				local available_width = gfx.w - text_x - 10
+				local lines = wrap_text(item.text, available_width)
+				local line_height = font_size + 2
+				local text_y = y + 4
+				
+				for _, line in ipairs(lines) do
+					gfx.x = text_x
+					gfx.y = text_y
+					gfx.drawstr(line)
+					text_y = text_y + line_height
+				end
+			else
+				gfx.x = text_x
+				gfx.y = y + task_text_y_offset
+				gfx.drawstr(item.text)
+			end
 		end
 
-		y = y + item_height
+		y = y + current_height
 	end
 
 	-- Draw dragged item at mouse position
@@ -1267,10 +1670,24 @@ function draw_gui()
 
 	-- Input bar at bottom (always appears active)
 	local input_y = gfx.h - input_height
-	gfx.set(0.4, 0.4, 0.4, 1) -- Slightly brighter to show it's always active
+	local input_r, input_g, input_b = hex_to_rgb(input_bar_bg_color)
+	gfx.set(input_r, input_g, input_b, 1)
 	gfx.rect(0, input_y, gfx.w, input_height)
 
-	gfx.set(0.9, 0.9, 0.9, 1)
+	-- Draw input bar border
+	local border_r, border_g, border_b = hex_to_rgb(input_bar_border_color)
+	gfx.set(border_r, border_g, border_b, 1)
+	-- Top border
+	gfx.rect(0, input_y, gfx.w, input_bar_border_thickness)
+	-- Left border
+	gfx.rect(0, input_y, input_bar_border_thickness, input_height)
+	-- Right border
+	gfx.rect(gfx.w - input_bar_border_thickness, input_y, input_bar_border_thickness, input_height)
+	-- Bottom border
+	gfx.rect(0, gfx.h - input_bar_border_thickness, gfx.w, input_bar_border_thickness)
+
+	local text_r, text_g, text_b = hex_to_rgb(text_color)
+	gfx.set(text_r, text_g, text_b, 1)
 	gfx.x = 5
 	gfx.y = input_y + input_text_y_offset
 	local display_text = input_text
@@ -1278,9 +1695,6 @@ function draw_gui()
 		display_text = display_text .. "|"
 	end
 	gfx.drawstr("Add task: " .. display_text)
-
-	-- Draw context menu last (on top)
-	draw_menu()
 end
 
 function handle_mouse()
@@ -1293,8 +1707,29 @@ function handle_mouse()
 	local mouse_moved = (mouse_x ~= last_mouse_x or mouse_y ~= last_mouse_y)
 	local mouse_cap_changed = (mouse_cap ~= last_mouse_cap)
 
-	if not mouse_moved and not mouse_cap_changed and not dragging and not menu_open then
+	if not mouse_moved and not mouse_cap_changed and not dragging and current_view == "tasks" then
 		return -- Nothing to do
+	end
+
+	-- Handle settings view separately
+	if current_view == "settings" then
+		handle_settings_mouse()
+		last_mouse_x = mouse_x
+		last_mouse_y = mouse_y
+		last_mouse_cap = mouse_cap
+		request_immediate_update()
+		return
+	end
+
+	-- Handle right mouse button - toggle to settings view (check BEFORE updating last_mouse_cap)
+	if mouse_cap & 2 == 2 and last_mouse_cap & 2 == 0 then -- Right click
+		current_view = "settings"
+		settings_scroll_offset = 0 -- Reset scroll when entering settings
+		last_mouse_x = mouse_x
+		last_mouse_y = mouse_y
+		last_mouse_cap = mouse_cap
+		request_immediate_update()
+		return
 	end
 
 	last_mouse_x = mouse_x
@@ -1303,55 +1738,6 @@ function handle_mouse()
 	request_immediate_update()
 
 	local display_list = get_display_list()
-
-	-- Handle right mouse button (simple logic)
-	if mouse_cap & 2 == 2 then -- Right mouse button down
-		-- Check if clicking on input bar
-		local input_y = gfx.h - input_height
-		if mouse_y >= input_y then
-			-- Right-click on input bar - perform undo
-			undo_last_action()
-		else
-			-- Right-click anywhere else - show context menu
-			if not menu_open then
-				show_context_menu(mouse_x, mouse_y)
-			end
-		end
-		return
-	end
-
-	-- Handle menu clicks first
-	if menu_open and mouse_cap & 1 == 1 then
-		local menu_height = #menu_items * menu_item_height
-
-		-- Adjust menu position to stay on screen
-		local adj_x = math.min(menu_x, gfx.w - menu_width)
-		local adj_y = math.min(menu_y, gfx.h - menu_height)
-
-		-- Check if clicking on menu
-		local clicking_menu = mouse_x >= adj_x
-			and mouse_x <= adj_x + menu_width
-			and mouse_y >= adj_y
-			and mouse_y <= adj_y + menu_height
-
-		if clicking_menu then
-			-- Find which menu item was clicked
-			for i, menu_item in ipairs(menu_items) do
-				local item_y = adj_y + (i - 1) * menu_item_height
-				local is_enabled = menu_item.enabled == nil or menu_item.enabled
-
-				if mouse_y >= item_y and mouse_y <= item_y + menu_item_height and is_enabled then
-					menu_item.action()
-					menu_open = false
-					return
-				end
-			end
-		else
-			-- Clicking outside menu, close it
-			menu_open = false
-			return
-		end
-	end
 
 	-- Middle click for delete
 	if mouse_cap & 64 == 64 then -- Middle mouse button
@@ -1453,7 +1839,8 @@ function handle_mouse()
 	-- Mouse wheel scrolling
 	if gfx.mouse_wheel ~= 0 then
 		local max_scroll = get_scroll_limits(display_list)
-		local scroll_amount = gfx.mouse_wheel > 0 and -item_height or item_height
+		-- Scroll by a fixed amount regardless of item height
+		local scroll_amount = gfx.mouse_wheel > 0 and -30 or 30
 		scroll_offset = math.max(0, math.min(scroll_offset + scroll_amount, max_scroll))
 		gfx.mouse_wheel = 0
 	end
@@ -1583,3 +1970,4 @@ function main()
 end
 
 main()
+ 
