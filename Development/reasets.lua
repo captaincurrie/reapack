@@ -1,3 +1,4 @@
+
 -- @description reasets - REAper track-SETS manager
 -- @version 1.0
 -- @author captaincurrie
@@ -290,6 +291,7 @@ local MOUSE = {
 }
 
 local CONFIG = {
+	DEFAULT_SETTINGS_FONT_SIZE = 14,
 	DEFAULT_BOX_WIDTH = 200,
 	DEFAULT_BOX_HEIGHT = 40,
 	DEFAULT_FONT_SIZE = 16,
@@ -497,6 +499,8 @@ local STATE = {
 	selection_end = nil, -- End position of text selection (nil if no selection)
 	selection_dragging = false, -- Whether currently dragging to select text
 	create_button_pos = { x = 0, y = 0 }, -- Position of create set button
+
+	settings_font_size = CONFIG.DEFAULT_SETTINGS_FONT_SIZE,
 
 	-- Settings
 	box_width = CONFIG.DEFAULT_BOX_WIDTH,
@@ -1462,6 +1466,7 @@ local function save_sets()
 			auto_hide_mcp = STATE.auto_hide_mcp,
 			use_first_track_name = STATE.use_first_track_name,
 			is_docked = STATE.is_docked,
+			settings_font_size = STATE.settings_font_size,
 		},
 	}
 
@@ -1507,6 +1512,9 @@ local function load_sets()
 			end
 			if data.settings.is_docked ~= nil then
 				STATE.is_docked = data.settings.is_docked
+			end
+			if data.settings.settings_font_size ~= nil then
+				STATE.settings_font_size = data.settings.settings_font_size
 			end
 		end
 	else
@@ -2330,10 +2338,7 @@ local function draw_button(x, y, w, h, text, is_active)
 	return { x = x, y = y, w = w, h = h }
 end
 
-local function draw_slider(x, y, w, h, value, min_val, max_val, label)
-	-- Draw label
-	draw_text(x, y - 25, label, CONFIG.COLOR_TEXT)
-
+local function draw_slider(x, y, w, h, value, min_val, max_val)
 	-- Draw slider background
 	draw_rect_filled(x, y, w, h, CONFIG.COLOR_BOX)
 	draw_rect_border(x, y, w, h, CONFIG.COLOR_BOX_BORDER)
@@ -2342,154 +2347,106 @@ local function draw_slider(x, y, w, h, value, min_val, max_val, label)
 	local fill_width = ((value - min_val) / (max_val - min_val)) * w
 	draw_rect_filled(x, y, fill_width, h, CONFIG.COLOR_BOX_SELECTED)
 
-	-- Draw value text
+	-- Draw value text to the right of the slider
 	local value_text = string.format("%d", value)
-	local value_width = gfx.measurestr(value_text)
-	draw_text(x + w + 10, y + (h - gfx.texth) / 2, value_text, CONFIG.COLOR_TEXT)
+	draw_text(x + w + 8, y + (h - gfx.texth) / 2, value_text, CONFIG.COLOR_TEXT)
 
 	return { x = x, y = y, w = w, h = h, min = min_val, max = max_val }
 end
 
 local function calculate_settings_elements()
-	local padding = 40
-	local center_x = gfx.w / 2
+	-- Single-column layout: every label sits directly above its control.
+	-- All controls are full-width (minus side padding).
+	local padding    = 12
+	local gap        = 6   -- gap between label and its control
+	local section    = 18  -- vertical gap between sections
+	local btn_h      = CONFIG.SETTINGS_BUTTON_HEIGHT
+	local slider_h   = CONFIG.SETTINGS_SLIDER_HEIGHT
+	local ctrl_w     = gfx.w - padding * 2          -- full control width
+	local half_w     = (ctrl_w - 6) / 2             -- for paired +/- or 2-option buttons
+	local third_w    = (ctrl_w - 12) / 3            -- for 3-option toolbar buttons
+	-- Leave 32px on the right for the value readout next to sliders
+	local slider_w   = ctrl_w - 32
 
-	-- Calculate responsive sizes
-	local button_width = math.max(50, math.min(CONFIG.SETTINGS_BUTTON_WIDTH, (gfx.w - 100) / 2))
-	local slider_width = math.max(CONFIG.SETTINGS_MIN_SLIDER_WIDTH, math.min(CONFIG.SETTINGS_SLIDER_WIDTH, gfx.w - 160))
-
-	local elements = {}
+	local elements   = {}
 	elements.padding = padding
 
-	-- Start y position (will be offset by scroll)
-	local y = 20
+	local y          = 15
+	local label_h    = gfx.texth + gap  -- label height + gap before control
 
-	-- Font size section
+	-- ── Set Font Size ────────────────────────────────────────────────────────
 	elements.font_size_label_y = y
-	local header_spacing = gfx.texth + 8
-	y = y + header_spacing
+	y = y + label_h
+	elements.font_dec_btn = { x = padding,              y = y, w = half_w, h = btn_h }
+	elements.font_inc_btn = { x = padding + half_w + 6, y = y, w = half_w, h = btn_h }
+	y = y + btn_h + section
 
-	elements.font_dec_btn = {
-		x = center_x - button_width - 5,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	elements.font_inc_btn = {
-		x = center_x + 5,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	y = y + CONFIG.SETTINGS_BUTTON_HEIGHT + 20
+	-- ── Settings Font Size ───────────────────────────────────────────────────
+	elements.settings_font_size_label_y = y
+	y = y + label_h
+	elements.settings_font_dec_btn = { x = padding,              y = y, w = half_w, h = btn_h }
+	elements.settings_font_inc_btn = { x = padding + half_w + 6, y = y, w = half_w, h = btn_h }
+	y = y + btn_h + section
 
-	-- Growth direction section
+	-- ── Growth Direction ─────────────────────────────────────────────────────
 	elements.growth_label_y = y
-	y = y + header_spacing
+	y = y + label_h
+	elements.growth_down_btn = { x = padding,              y = y, w = half_w, h = btn_h }
+	elements.growth_up_btn   = { x = padding + half_w + 6, y = y, w = half_w, h = btn_h }
+	y = y + btn_h + section
 
-	elements.growth_down_btn = {
-		x = center_x - button_width - 5,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	elements.growth_up_btn = {
-		x = center_x + 5,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	y = y + CONFIG.SETTINGS_BUTTON_HEIGHT + 20
-
-	-- Sliders section
-	elements.width_slider_y = y
+	-- ── Set Width slider ─────────────────────────────────────────────────────
+	elements.width_slider_label_y = y
+	y = y + label_h
 	elements.width_slider = {
-		x = center_x - slider_width / 2,
-		y = y + 20,
-		w = slider_width,
-		h = CONFIG.SETTINGS_SLIDER_HEIGHT,
-		min = CONFIG.MIN_BOX_WIDTH,
-		max = CONFIG.MAX_BOX_WIDTH,
+		x = padding, y = y, w = slider_w, h = slider_h,
+		min = CONFIG.MIN_BOX_WIDTH, max = CONFIG.MAX_BOX_WIDTH,
 	}
-	y = y + 50
+	y = y + slider_h + section
 
-	elements.height_slider_y = y
+	-- ── Set Height slider ────────────────────────────────────────────────────
+	elements.height_slider_label_y = y
+	y = y + label_h
 	elements.height_slider = {
-		x = center_x - slider_width / 2,
-		y = y + 20,
-		w = slider_width,
-		h = CONFIG.SETTINGS_SLIDER_HEIGHT,
-		min = 30,
-		max = 100,
+		x = padding, y = y, w = slider_w, h = slider_h,
+		min = 30, max = 100,
 	}
-	y = y + 50
+	y = y + slider_h + section
 
-	elements.scroll_slider_y = y
+	-- ── Scroll Speed slider ──────────────────────────────────────────────────
+	elements.scroll_slider_label_y = y
+	y = y + label_h
 	elements.scroll_slider = {
-		x = center_x - slider_width / 2,
-		y = y + 20,
-		w = slider_width,
-		h = CONFIG.SETTINGS_SLIDER_HEIGHT,
-		min = 5,
-		max = 50,
+		x = padding, y = y, w = slider_w, h = slider_h,
+		min = 5, max = 50,
 	}
-	y = y + 50
+	y = y + slider_h + section
 
-	-- Show All Tracks Set section
+	-- ── Show All Tracks Set ──────────────────────────────────────────────────
 	elements.all_tracks_label_y = y
-	y = y + header_spacing
+	y = y + label_h
+	elements.all_tracks_toggle_btn = { x = padding, y = y, w = ctrl_w, h = btn_h }
+	y = y + btn_h + section
 
-	elements.all_tracks_toggle_btn = {
-		x = center_x - button_width / 2,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	y = y + CONFIG.SETTINGS_BUTTON_HEIGHT + 20
-
-	-- Use First Track Name section
+	-- ── Use First Track Name ─────────────────────────────────────────────────
 	elements.use_track_name_label_y = y
-	y = y + header_spacing
+	y = y + label_h
+	elements.use_track_name_toggle_btn = { x = padding, y = y, w = ctrl_w, h = btn_h }
+	y = y + btn_h + section
 
-	elements.use_track_name_toggle_btn = {
-		x = center_x - button_width / 2,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	y = y + CONFIG.SETTINGS_BUTTON_HEIGHT + 20
-
-	-- Toolbar position section
+	-- ── Toolbar Position ─────────────────────────────────────────────────────
 	elements.toolbar_label_y = y
-	y = y + header_spacing
+	y = y + label_h
+	elements.toolbar_top_btn    = { x = padding,                      y = y, w = third_w, h = btn_h }
+	elements.toolbar_bottom_btn = { x = padding + third_w + 6,        y = y, w = third_w, h = btn_h }
+	elements.toolbar_hide_btn   = { x = padding + (third_w + 6) * 2,  y = y, w = third_w, h = btn_h }
+	y = y + btn_h + section
 
-	local button_count = 3
-	local total_button_width = button_width * button_count + 10 * (button_count - 1)
-	local start_x = center_x - total_button_width / 2
-
-	elements.toolbar_top_btn = {
-		x = start_x,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	elements.toolbar_bottom_btn = {
-		x = start_x + button_width + 10,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	elements.toolbar_hide_btn = {
-		x = start_x + (button_width + 10) * 2,
-		y = y,
-		w = button_width,
-		h = CONFIG.SETTINGS_BUTTON_HEIGHT,
-	}
-	y = y + CONFIG.SETTINGS_BUTTON_HEIGHT + 20
-
-	-- Calculate total content height and max scroll
+	-- ── Max scroll ───────────────────────────────────────────────────────────
+	-- Visible area is reduced by border_top (10) + border_bottom margin (50)
+	-- + is_within_bounds padding (5 top + 5 bottom) = 70px total.
 	elements.content_height = y
-	elements.max_scroll = math.max(0, elements.content_height - gfx.h)
+	elements.max_scroll = math.max(0, elements.content_height - (gfx.h - 70))
 
 	return elements
 end
@@ -2498,7 +2455,7 @@ local function draw_settings_view()
 	-- Draw background
 	draw_rect_filled(0, 0, gfx.w, gfx.h, CONFIG.COLOR_BG)
 
-	-- IMPROVEMENT 3: Only recalculate settings elements when window size changes
+	-- Only recalculate settings elements when window size changes
 	if not STATE.settings_cached_elements
 		or STATE.settings_cached_gfx_w ~= gfx.w
 		or STATE.settings_cached_gfx_h ~= gfx.h
@@ -2507,206 +2464,126 @@ local function draw_settings_view()
 		STATE.settings_cached_gfx_w = gfx.w
 		STATE.settings_cached_gfx_h = gfx.h
 	end
-	local el = STATE.settings_cached_elements
-
-	-- Calculate scroll offset positions
+	local el     = STATE.settings_cached_elements
 	local scroll = STATE.settings_scroll_offset
 
-	-- Draw settings panel border
-	local border_left = CONFIG.SETTINGS_PANEL_PADDING
-	local border_right = gfx.w - CONFIG.SETTINGS_PANEL_PADDING
-	local border_width = border_right - border_left
-	local border_top = 10
+	-- Panel border
+	local border_left   = 6
+	local border_top    = 10
+	local border_width  = gfx.w - border_left * 2
 	local border_bottom = gfx.h - 50
 	local border_height = border_bottom - border_top
 
 	draw_rect_filled(border_left, border_top, border_width, border_height, CONFIG.COLOR_BG)
-	draw_rect_border(
-		border_left,
-		border_top,
-		border_width,
-		border_height,
-		CONFIG.SETTINGS_PANEL_BORDER_COLOR,
-		CONFIG.BORDER_THICKNESS
-	)
+	draw_rect_border(border_left, border_top, border_width, border_height,
+		CONFIG.SETTINGS_PANEL_BORDER_COLOR, CONFIG.BORDER_THICKNESS)
 
-	-- Helper function to check if element is within visible bounds
-	local function is_within_bounds(y, h)
-		local adjusted_y = y - scroll
-		return adjusted_y >= border_top + 5 and adjusted_y + h <= border_bottom - 5
+	-- Returns true if the element at scrolled-y with height h is visible
+	local function vis(elem_y, h)
+		local sy = elem_y - scroll
+		return sy + h > border_top + 5 and sy < border_bottom - 5
 	end
 
-	-- Font size section
-	if is_within_bounds(el.font_size_label_y, gfx.texth) then
-		local font_label = "Font Size: " .. STATE.font_size
-		local font_label_width = gfx.measurestr(font_label)
-		draw_text((gfx.w - font_label_width) / 2, el.font_size_label_y - scroll, font_label, CONFIG.COLOR_TEXT)
+	-- Draws a centered label, truncated with ellipsis if wider than available area
+	local max_label_w = gfx.w - el.padding * 2
+	local function draw_label(raw_y, text)
+		if not vis(raw_y, gfx.texth) then return end
+		local truncated = truncate_text_with_ellipsis(text, max_label_w)
+		local tw = gfx.measurestr(truncated)
+		draw_text((gfx.w - tw) / 2, raw_y - scroll, truncated, CONFIG.COLOR_TEXT_GREY)
 	end
 
-	if is_within_bounds(el.font_dec_btn.y, el.font_dec_btn.h) then
-		draw_button(el.font_dec_btn.x, el.font_dec_btn.y - scroll, el.font_dec_btn.w, el.font_dec_btn.h, "-", false)
-	end
-	if is_within_bounds(el.font_inc_btn.y, el.font_inc_btn.h) then
-		draw_button(el.font_inc_btn.x, el.font_inc_btn.y - scroll, el.font_inc_btn.w, el.font_inc_btn.h, "+", false)
-	end
-
-	-- Growth direction section
-	if is_within_bounds(el.growth_label_y, gfx.texth) then
-		local growth_label = "Growth Direction"
-		local growth_label_width = gfx.measurestr(growth_label)
-		draw_text((gfx.w - growth_label_width) / 2, el.growth_label_y - scroll, growth_label, CONFIG.COLOR_TEXT)
+	-- ── Set Font Size ────────────────────────────────────────────────────────
+	draw_label(el.font_size_label_y, "Set Font Size: " .. STATE.font_size)
+	if vis(el.font_dec_btn.y, el.font_dec_btn.h) then
+		draw_button(el.font_dec_btn.x, el.font_dec_btn.y - scroll,
+			el.font_dec_btn.w, el.font_dec_btn.h, "-", false)
+		draw_button(el.font_inc_btn.x, el.font_inc_btn.y - scroll,
+			el.font_inc_btn.w, el.font_inc_btn.h, "+", false)
 	end
 
-	if is_within_bounds(el.growth_down_btn.y, el.growth_down_btn.h) then
-		draw_button(
-			el.growth_down_btn.x,
-			el.growth_down_btn.y - scroll,
-			el.growth_down_btn.w,
-			el.growth_down_btn.h,
-			"Down",
-			STATE.growth_direction == "down"
-		)
-	end
-	if is_within_bounds(el.growth_up_btn.y, el.growth_up_btn.h) then
-		draw_button(
-			el.growth_up_btn.x,
-			el.growth_up_btn.y - scroll,
-			el.growth_up_btn.w,
-			el.growth_up_btn.h,
-			"Up",
-			STATE.growth_direction == "up"
-		)
+	-- ── Settings Font Size ───────────────────────────────────────────────────
+	draw_label(el.settings_font_size_label_y, "Settings Font Size: " .. STATE.settings_font_size)
+	if vis(el.settings_font_dec_btn.y, el.settings_font_dec_btn.h) then
+		draw_button(el.settings_font_dec_btn.x, el.settings_font_dec_btn.y - scroll,
+			el.settings_font_dec_btn.w, el.settings_font_dec_btn.h, "-", false)
+		draw_button(el.settings_font_inc_btn.x, el.settings_font_inc_btn.y - scroll,
+			el.settings_font_inc_btn.w, el.settings_font_inc_btn.h, "+", false)
 	end
 
-	-- Sliders section
-	if is_within_bounds(el.width_slider.y, el.width_slider.h + 25) then
-		draw_slider(
-			el.width_slider.x,
-			el.width_slider.y - scroll,
-			el.width_slider.w,
-			el.width_slider.h,
-			STATE.box_width,
-			el.width_slider.min,
-			el.width_slider.max,
-			"Set Width"
-		)
+	-- ── Growth Direction ─────────────────────────────────────────────────────
+	draw_label(el.growth_label_y, "Growth Direction")
+	if vis(el.growth_down_btn.y, el.growth_down_btn.h) then
+		draw_button(el.growth_down_btn.x, el.growth_down_btn.y - scroll,
+			el.growth_down_btn.w, el.growth_down_btn.h, "Down",
+			STATE.growth_direction == "down")
+		draw_button(el.growth_up_btn.x, el.growth_up_btn.y - scroll,
+			el.growth_up_btn.w, el.growth_up_btn.h, "Up",
+			STATE.growth_direction == "up")
 	end
 
-	if is_within_bounds(el.height_slider.y, el.height_slider.h + 25) then
-		draw_slider(
-			el.height_slider.x,
-			el.height_slider.y - scroll,
-			el.height_slider.w,
-			el.height_slider.h,
-			STATE.box_height,
-			el.height_slider.min,
-			el.height_slider.max,
-			"Set Height"
-		)
+	-- ── Set Width slider ─────────────────────────────────────────────────────
+	draw_label(el.width_slider_label_y, "Set Width")
+	if vis(el.width_slider.y, el.width_slider.h) then
+		draw_slider(el.width_slider.x, el.width_slider.y - scroll,
+			el.width_slider.w, el.width_slider.h,
+			STATE.box_width, el.width_slider.min, el.width_slider.max)
 	end
 
-	if is_within_bounds(el.scroll_slider.y, el.scroll_slider.h + 25) then
-		draw_slider(
-			el.scroll_slider.x,
-			el.scroll_slider.y - scroll,
-			el.scroll_slider.w,
-			el.scroll_slider.h,
-			STATE.scroll_speed,
-			el.scroll_slider.min,
-			el.scroll_slider.max,
-			"Scroll Speed"
-		)
+	-- ── Set Height slider ────────────────────────────────────────────────────
+	draw_label(el.height_slider_label_y, "Set Height")
+	if vis(el.height_slider.y, el.height_slider.h) then
+		draw_slider(el.height_slider.x, el.height_slider.y - scroll,
+			el.height_slider.w, el.height_slider.h,
+			STATE.box_height, el.height_slider.min, el.height_slider.max)
 	end
 
-	-- Show All Tracks Set section
-	if is_within_bounds(el.all_tracks_label_y, gfx.texth) then
-		local all_tracks_label = "Show All Tracks Set"
-		local all_tracks_label_width = gfx.measurestr(all_tracks_label)
-		draw_text(
-			(gfx.w - all_tracks_label_width) / 2,
-			el.all_tracks_label_y - scroll,
-			all_tracks_label,
-			CONFIG.COLOR_TEXT
-		)
+	-- ── Scroll Speed slider ──────────────────────────────────────────────────
+	draw_label(el.scroll_slider_label_y, "Scroll Speed")
+	if vis(el.scroll_slider.y, el.scroll_slider.h) then
+		draw_slider(el.scroll_slider.x, el.scroll_slider.y - scroll,
+			el.scroll_slider.w, el.scroll_slider.h,
+			STATE.scroll_speed, el.scroll_slider.min, el.scroll_slider.max)
 	end
 
-	if is_within_bounds(el.all_tracks_toggle_btn.y, el.all_tracks_toggle_btn.h) then
-		draw_button(
-			el.all_tracks_toggle_btn.x,
-			el.all_tracks_toggle_btn.y - scroll,
-			el.all_tracks_toggle_btn.w,
-			el.all_tracks_toggle_btn.h,
+	-- ── Show All Tracks Set ──────────────────────────────────────────────────
+	draw_label(el.all_tracks_label_y, "Show All Tracks Set")
+	if vis(el.all_tracks_toggle_btn.y, el.all_tracks_toggle_btn.h) then
+		draw_button(el.all_tracks_toggle_btn.x, el.all_tracks_toggle_btn.y - scroll,
+			el.all_tracks_toggle_btn.w, el.all_tracks_toggle_btn.h,
 			STATE.show_all_tracks_set and "ON" or "OFF",
-			STATE.show_all_tracks_set
-		)
+			STATE.show_all_tracks_set)
 	end
 
-	-- Use First Track Name section
-	if is_within_bounds(el.use_track_name_label_y, gfx.texth) then
-		local use_track_name_label = "Use First Track Name"
-		local use_track_name_label_width = gfx.measurestr(use_track_name_label)
-		draw_text(
-			(gfx.w - use_track_name_label_width) / 2,
-			el.use_track_name_label_y - scroll,
-			use_track_name_label,
-			CONFIG.COLOR_TEXT
-		)
-	end
-
-	if is_within_bounds(el.use_track_name_toggle_btn.y, el.use_track_name_toggle_btn.h) then
-		draw_button(
-			el.use_track_name_toggle_btn.x,
-			el.use_track_name_toggle_btn.y - scroll,
-			el.use_track_name_toggle_btn.w,
-			el.use_track_name_toggle_btn.h,
+	-- ── Use First Track Name ─────────────────────────────────────────────────
+	draw_label(el.use_track_name_label_y, "Use First Track Name")
+	if vis(el.use_track_name_toggle_btn.y, el.use_track_name_toggle_btn.h) then
+		draw_button(el.use_track_name_toggle_btn.x, el.use_track_name_toggle_btn.y - scroll,
+			el.use_track_name_toggle_btn.w, el.use_track_name_toggle_btn.h,
 			STATE.use_first_track_name and "ON" or "OFF",
-			STATE.use_first_track_name
-		)
+			STATE.use_first_track_name)
 	end
 
-	-- Toolbar position section
-	if is_within_bounds(el.toolbar_label_y, gfx.texth) then
-		local toolbar_label = "Toolbar Position"
-		local toolbar_label_width = gfx.measurestr(toolbar_label)
-		draw_text((gfx.w - toolbar_label_width) / 2, el.toolbar_label_y - scroll, toolbar_label, CONFIG.COLOR_TEXT)
+	-- ── Toolbar Position ─────────────────────────────────────────────────────
+	draw_label(el.toolbar_label_y, "Toolbar Position")
+	if vis(el.toolbar_top_btn.y, el.toolbar_top_btn.h) then
+		draw_button(el.toolbar_top_btn.x, el.toolbar_top_btn.y - scroll,
+			el.toolbar_top_btn.w, el.toolbar_top_btn.h, "Top",
+			STATE.toolbar_position == "top")
+		draw_button(el.toolbar_bottom_btn.x, el.toolbar_bottom_btn.y - scroll,
+			el.toolbar_bottom_btn.w, el.toolbar_bottom_btn.h, "Bottom",
+			STATE.toolbar_position == "bottom")
+		draw_button(el.toolbar_hide_btn.x, el.toolbar_hide_btn.y - scroll,
+			el.toolbar_hide_btn.w, el.toolbar_hide_btn.h, "Hide",
+			STATE.toolbar_position == "hide")
 	end
 
-	if is_within_bounds(el.toolbar_top_btn.y, el.toolbar_top_btn.h) then
-		draw_button(
-			el.toolbar_top_btn.x,
-			el.toolbar_top_btn.y - scroll,
-			el.toolbar_top_btn.w,
-			el.toolbar_top_btn.h,
-			"Top",
-			STATE.toolbar_position == "top"
-		)
-	end
-	if is_within_bounds(el.toolbar_bottom_btn.y, el.toolbar_bottom_btn.h) then
-		draw_button(
-			el.toolbar_bottom_btn.x,
-			el.toolbar_bottom_btn.y - scroll,
-			el.toolbar_bottom_btn.w,
-			el.toolbar_bottom_btn.h,
-			"Bottom",
-			STATE.toolbar_position == "bottom"
-		)
-	end
-	if is_within_bounds(el.toolbar_hide_btn.y, el.toolbar_hide_btn.h) then
-		draw_button(
-			el.toolbar_hide_btn.x,
-			el.toolbar_hide_btn.y - scroll,
-			el.toolbar_hide_btn.w,
-			el.toolbar_hide_btn.h,
-			"Hide",
-			STATE.toolbar_position == "hide"
-		)
-	end
-
-	-- Draw instructions at bottom (not scrollable)
+	-- ── Footer (non-scrolling) ───────────────────────────────────────────────
 	local help_text = "Right-click to close"
-	local help_width = gfx.measurestr(help_text)
-	draw_text((gfx.w - help_width) / 2, gfx.h - 40, help_text, CONFIG.COLOR_TEXT_GREY)
+	local help_w = gfx.measurestr(help_text)
+	draw_text((gfx.w - help_w) / 2, gfx.h - 35, help_text, CONFIG.COLOR_TEXT_GREY)
 end
+
 
 local function render()
 	-- Only render if state has changed or window was resized
@@ -2715,11 +2592,12 @@ local function render()
 	end
 
 	gfx.dest = -1 -- Draw to main window
-	gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
 
 	if STATE.view == "settings" then
+		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.settings_font_size)
 		draw_settings_view()
 	else
+		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
 		STATE.toolbar_buttons = draw_main_view()
 	end
 
@@ -3435,6 +3313,18 @@ local function handle_settings_interaction(mouse_x, mouse_y, is_left_down, is_le
 			STATE.font_size = math.min(32, STATE.font_size + 1)
 			STATE.settings_cached_elements = nil
 			STATE.cached_boxes = nil
+			STATE.dirty = true
+			request_save()
+			return true
+		elseif is_over(el.settings_font_dec_btn) then
+			STATE.settings_font_size = math.max(8, STATE.settings_font_size - 1)
+			STATE.settings_cached_elements = nil
+			STATE.dirty = true
+			request_save()
+			return true
+		elseif is_over(el.settings_font_inc_btn) then
+			STATE.settings_font_size = math.min(32, STATE.settings_font_size + 1)
+			STATE.settings_cached_elements = nil
 			STATE.dirty = true
 			request_save()
 			return true
