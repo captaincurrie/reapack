@@ -5,7 +5,7 @@
 -- @date 2025 12 28
 -- @about reatask - reaper task manager
 
---[[ PROJECT SPEC
+--[[ PROGRAM SPEC
 The intention of this program is to create a task manager for the DAW Reaper.
 
 - Create a GUI that organizes all important information and operations
@@ -133,6 +133,9 @@ local drop_position = "after" -- "before", "after", "child"
 -- Performance optimization
 local display_list_cache = nil
 local cache_dirty = true
+local last_window_w = 0
+local last_window_h = 0
+local last_blink_state = nil
 
 -- GUI dimensions (base values at base_font_size)
 local window_w = 300
@@ -153,32 +156,60 @@ local menu_width = base_menu_width
 local menu_item_height = base_menu_item_height
 
 -- Data file variables
-local todolist_basename = "reatask"
-local todolist_tasklist_suffix = ".tasks"
-local todolist_settinglist_suffix = ".settings"
-local unsaved_todolist_name = todolist_basename .. "-unsaved"
+local window_name = "reatask"
+local todolist_dirname = ".reatask"
+local todolist_tasklist_filename = "tasks"
+local todolist_settinglist_filename = "settings"
+local unsaved_todolist_name = "unsaved"
 
 -- Window settings
 local default_dock_state = 0 -- 0 = undocked (floating), 1 = docked
 
 function get_project_identifier()
+	-- EnumProjects(-1) returns the active project's file path directly
 	local _, proj_file = r.EnumProjects(-1)
-	local proj_path
-
+	
 	if not proj_file or proj_file == "" then
 		-- Use Reaper's resource path for unsaved projects
 		local resource_path = r.GetResourcePath()
-		proj_path = resource_path .. "/" .. unsaved_todolist_name
+		return resource_path .. "/" .. unsaved_todolist_name
 	else
 		-- Extract directory from the full project file path
+		-- Handle both Unix (/) and Windows (\\) path separators
 		local proj_dir = proj_file:match("^(.*[/\\])")
 		if not proj_dir then
 			return nil
 		end
-		proj_path = proj_dir .. todolist_basename
+		return proj_dir
+	end
+end
+
+function get_reatask_dir()
+	local proj_id = get_project_identifier()
+	if not proj_id then
+		return nil
+	end
+	-- Strip trailing separator to avoid double separators
+	proj_id = proj_id:gsub("[/\\]$", "")
+	return proj_id .. "/" .. todolist_dirname
+end
+
+function ensure_reatask_dir_exists()
+	local reatask_dir = get_reatask_dir()
+	if not reatask_dir then
+		return false
 	end
 
-	return proj_path
+	if not r.file_exists(reatask_dir .. "/") then
+		r.RecursiveCreateDirectory(reatask_dir, 0)
+
+		-- Verify directory was created
+		if not r.file_exists(reatask_dir .. "/") then
+			return false
+		end
+	end
+	
+	return true
 end
 
 function mark_cache_dirty()
@@ -323,8 +354,12 @@ function undo_last_action()
 end
 
 function load_settings()
-	local proj_id = get_project_identifier()
-	local settings_file = proj_id .. todolist_settinglist_suffix
+	if not ensure_reatask_dir_exists() then
+		return
+	end
+	
+	local reatask_dir = get_reatask_dir()
+	local settings_file = reatask_dir .. "/" .. todolist_settinglist_filename
 
 	if r.file_exists(settings_file) then
 		local file = io.open(settings_file, "r")
@@ -369,11 +404,42 @@ function load_settings()
 end
 
 function save_settings()
-	local proj_id = current_project_path
-	if proj_id == "" then
-		proj_id = get_project_identifier()
+	if not ensure_reatask_dir_exists() then
+		return false
 	end
-	local settings_file = proj_id .. todolist_settinglist_suffix
+	return save_settings_to_dir(get_reatask_dir())
+end
+
+-- Internal version that marks for deferred save
+function save_settings_deferred()
+	mark_needs_save()
+end
+
+function save_todo_data_to_dir(reatask_dir)
+	local data_file = reatask_dir .. "/" .. todolist_tasklist_filename
+	local file = io.open(data_file, "w")
+	if file then
+		for _, item in pairs(todo_items) do
+			file:write(
+				string.format(
+					"%d:%s:%s:%d:%s:%s\n",
+					item.id,
+					item.parent_id and tostring(item.parent_id) or "",
+					tostring(item.done),
+					item.order,
+					tostring(item.collapsed),
+					item.text
+				)
+			)
+		end
+		file:close()
+		return true
+	end
+	return false
+end
+
+function save_settings_to_dir(reatask_dir)
+	local settings_file = reatask_dir .. "/" .. todolist_settinglist_filename
 	local file = io.open(settings_file, "w")
 	if file then
 		file:write(string.format("font_name:%s\n", font_name))
@@ -388,29 +454,40 @@ function save_settings()
 		file:write(string.format("input_bar_border_thickness:%d\n", input_bar_border_thickness))
 		file:write(string.format("wrap_task_text:%s\n", tostring(wrap_task_text)))
 		file:close()
+		return true
 	end
-end
-
--- Internal version that marks for deferred save
-function save_settings_deferred()
-	mark_needs_save()
+	return false
 end
 
 function load_todo_data()
 	local proj_id = get_project_identifier()
 	if proj_id ~= current_project_path then
-		-- Save current project data before switching
+		-- Save current project data to the OLD directory before switching
 		if current_project_path ~= "" then
-			save_todo_data()
-			save_settings()
+			local old_base = current_project_path:gsub("[/\\]$", "")
+			local old_reatask_dir = old_base .. "/" .. todolist_dirname
+			save_todo_data_to_dir(old_reatask_dir)
+			save_settings_to_dir(old_reatask_dir)
 		end
-
+		
+		-- Only update current_project_path after saving old data
 		current_project_path = proj_id
-		local data_file = proj_id .. todolist_tasklist_suffix
+		
+		if not ensure_reatask_dir_exists() then
+			return
+		end
+		
+		local reatask_dir = get_reatask_dir()
+		local data_file = reatask_dir .. "/" .. todolist_tasklist_filename
+		
 		todo_items = {}
 		root_items = {}
 		next_id = 1
 		undo_stack = {} -- Clear undo stack for new project
+		needs_save = false -- Old data already saved above
+		selected_id = nil
+		scroll_offset = 0
+		input_text = ""
 		mark_cache_dirty()
 
 		if r.file_exists(data_file) then
@@ -421,13 +498,13 @@ function load_todo_data()
 
 				-- First pass: create all items
 				for line in content:gmatch("[^\r\n]+") do
-					local id, parent_id, text, done, order, collapsed =
-						line:match("^(%d+):([^:]*):([^:]*):(%w+):(%d+):([^:]*)")
-					if id and parent_id and text and done and order then
+					local id, parent_id, done, order, collapsed, text =
+						line:match("^(%d+):([^:]*):(%w+):(%d+):([^:]*):(.+)")
+					if id and done and order and text then
 						local item = {
 							id = tonumber(id),
 							parent_id = (parent_id == "" or parent_id == "0") and nil or tonumber(parent_id),
-							text = text,
+							text = text or "",
 							done = done == "true",
 							children = {},
 							order = tonumber(order),
@@ -473,30 +550,11 @@ function load_todo_data()
 end
 
 function save_todo_data()
-	local proj_id = current_project_path
-	if proj_id == "" then
-		proj_id = get_project_identifier()
+	if not ensure_reatask_dir_exists() then
+		return false
 	end
-	local data_file = proj_id .. todolist_tasklist_suffix
-	local file = io.open(data_file, "w")
-	if file then
-		for _, item in pairs(todo_items) do
-			file:write(
-				string.format(
-					"%d:%s:%s:%s:%d:%s\n",
-					item.id,
-					item.parent_id and tostring(item.parent_id) or "",
-					item.text,
-					tostring(item.done),
-					item.order,
-					tostring(item.collapsed)
-				)
-			)
-		end
-		file:close()
-	end
+	return save_todo_data_to_dir(get_reatask_dir())
 end
-
 function sort_children_alphabetically(children_list)
 	table.sort(children_list, function(a, b)
 		return string.lower(todo_items[a].text) < string.lower(todo_items[b].text)
@@ -584,7 +642,7 @@ function get_display_list()
 
 	display_list_cache = {}
 
-	function add_item_recursive(item_id, level)
+	local function add_item_recursive(item_id, level)
 		local item = todo_items[item_id]
 		if item then
 			-- Skip completed tasks if they're hidden
@@ -680,8 +738,8 @@ function get_settings_scroll_limits()
 	-- Sort Section
 	y_offset = y_offset + label_height + button_height + section_spacing
 	
-	-- Display Section
-	y_offset = y_offset + label_height + button_height + 10 + button_height + section_spacing
+	-- Display Section (show completed + wrap + dock buttons)
+	y_offset = y_offset + label_height + button_height + 10 + button_height + 10 + button_height + section_spacing
 	
 	-- Undo Section (if available)
 	if #undo_stack > 0 then
@@ -694,6 +752,78 @@ function get_settings_scroll_limits()
 	local total_content_height = y_offset
 	local max_scroll = math.max(0, total_content_height - gfx.h)
 	return max_scroll
+end
+
+function indent_task(task_id)
+	local item = todo_items[task_id]
+	if not item then return end
+
+	-- Find the previous sibling
+	local siblings = item.parent_id and todo_items[item.parent_id].children or root_items
+	local prev_sibling_id = nil
+
+	for i, sibling_id in ipairs(siblings) do
+		if sibling_id == task_id then
+			if i > 1 then
+				prev_sibling_id = siblings[i - 1]
+			end
+			break
+		end
+	end
+
+	if not prev_sibling_id then return end -- No previous sibling, can't indent
+
+	save_state_for_undo("Indent task")
+
+	-- Remove from current location
+	for i, sibling_id in ipairs(siblings) do
+		if sibling_id == task_id then
+			table.remove(siblings, i)
+			break
+		end
+	end
+
+	-- Add as last child of previous sibling
+	item.parent_id = prev_sibling_id
+	local prev_sibling = todo_items[prev_sibling_id]
+	prev_sibling.collapsed = false -- Expand to show new child
+	table.insert(prev_sibling.children, task_id)
+
+	reorder_items()
+end
+
+function unindent_task(task_id)
+	local item = todo_items[task_id]
+	if not item or not item.parent_id then return end -- Already at root level
+
+	save_state_for_undo("Unindent task")
+
+	local parent = todo_items[item.parent_id]
+	local grandparent_id = parent.parent_id
+
+	-- Remove from parent's children
+	for i, child_id in ipairs(parent.children) do
+		if child_id == task_id then
+			table.remove(parent.children, i)
+			break
+		end
+	end
+
+	-- Find parent's position in grandparent's list and insert after it
+	local grandparent_list = grandparent_id and todo_items[grandparent_id].children or root_items
+	local insert_pos = #grandparent_list + 1
+
+	for i, sibling_id in ipairs(grandparent_list) do
+		if sibling_id == item.parent_id then
+			insert_pos = i + 1
+			break
+		end
+	end
+
+	item.parent_id = grandparent_id
+	table.insert(grandparent_list, insert_pos, task_id)
+
+	reorder_items()
 end
 
 function toggle_collapse(item_id)
@@ -717,7 +847,7 @@ function reorder_items()
 	-- Reassign order values based on current structure
 	local order_counter = 1
 
-	function assign_order_recursive(item_id)
+	local function assign_order_recursive(item_id)
 		local item = todo_items[item_id]
 		if item then
 			item.order = order_counter
@@ -743,7 +873,7 @@ function is_descendant_or_self(potential_child_id, potential_ancestor_id)
 	end
 
 	-- Check if potential_child_id is a descendant of potential_ancestor_id
-	function check_descendants(ancestor_id)
+	local function check_descendants(ancestor_id)
 		local ancestor = todo_items[ancestor_id]
 		if not ancestor then
 			return false
@@ -1114,10 +1244,10 @@ function draw_settings_view()
 	y_offset = y_offset + button_height + button_spacing
 	
 	-- Text wrap button
-	local wrap_text = wrap_task_text and "Disable Text Wrap" or "Enable Text Wrap"
+	local wrap_btn_text = wrap_task_text and "Disable Text Wrap" or "Enable Text Wrap"
 	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
 		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
-	draw_button(margin, y_offset, content_width, button_height, wrap_text, false, mouse_over)
+	draw_button(margin, y_offset, content_width, button_height, wrap_btn_text, false, mouse_over)
 	y_offset = y_offset + button_height + button_spacing
 	
 	-- Dock/Undock button
@@ -1322,6 +1452,7 @@ function handle_settings_mouse()
 				request_immediate_update()
 			end
 		end
+		y_offset = y_offset + button_height + section_spacing
 	end
 	
 	-- Quit button (full width)
@@ -1352,6 +1483,7 @@ function add_task(text, as_subtask, outdent)
 		if as_subtask and selected_id and todo_items[selected_id] then
 			-- Add as subtask - selection stays on parent
 			new_item.parent_id = selected_id
+			todo_items[selected_id].collapsed = false -- Expand parent to show new child
 			table.insert(todo_items[selected_id].children, next_id)
 		elseif outdent and selected_id and todo_items[selected_id] then
 			-- Add task at parent level of selected task
@@ -1442,7 +1574,7 @@ function delete_task(task_id)
 
 		local item = todo_items[task_id]
 
-		function delete_recursive(item_id)
+		local function delete_recursive(item_id)
 			local item_to_delete = todo_items[item_id]
 			if item_to_delete then
 				for _, child_id in ipairs(item_to_delete.children) do
@@ -1477,6 +1609,13 @@ function delete_task(task_id)
 
 		mark_cache_dirty()
 		mark_needs_save()
+
+		-- Clamp scroll offset to valid range
+		local display_list = get_display_list()
+		local max_scroll = get_scroll_limits(display_list)
+		if scroll_offset > max_scroll then
+			scroll_offset = max_scroll
+		end
 	end
 end
 
@@ -1507,6 +1646,15 @@ end
 
 function draw_gui()
 	needs_redraw = false -- Reset redraw flag
+	
+	-- Check for window resize and invalidate cache if needed
+	if gfx.w ~= last_window_w or gfx.h ~= last_window_h then
+		last_window_w = gfx.w
+		last_window_h = gfx.h
+		if wrap_task_text then
+			mark_cache_dirty() -- Only need to invalidate if wrapping is enabled
+		end
+	end
 	
 	if current_view == "settings" then
 		draw_settings_view()
@@ -1628,7 +1776,7 @@ function draw_gui()
 				local available_width = gfx.w - text_x - 10
 				local lines = wrap_text(item.text, available_width)
 				local line_height = font_size + 2
-				local text_y = y + 4
+				local text_y = y + task_text_y_offset  -- Use same offset as non-wrapped text for consistent centering
 				
 				for _, line in ipairs(lines) do
 					gfx.x = text_x
@@ -1694,7 +1842,7 @@ function draw_gui()
 	if math.floor(r.time_precise() * 2) % 2 == 0 then
 		display_text = display_text .. "|"
 	end
-	gfx.drawstr("Add task: " .. display_text)
+	gfx.drawstr(display_text)
 end
 
 function handle_mouse()
@@ -1732,21 +1880,25 @@ function handle_mouse()
 		return
 	end
 
-	last_mouse_x = mouse_x
-	last_mouse_y = mouse_y
-	last_mouse_cap = mouse_cap
 	request_immediate_update()
 
 	local display_list = get_display_list()
 
-	-- Middle click for delete
-	if mouse_cap & 64 == 64 then -- Middle mouse button
+	-- Middle click for delete (edge-triggered, check BEFORE updating last_mouse_cap)
+	if mouse_cap & 64 == 64 and last_mouse_cap & 64 == 0 then -- Middle mouse button press
 		local click_info = get_item_at_position(mouse_x, mouse_y, display_list)
 		if click_info then
 			delete_task(click_info.item_id)
 		end
+		last_mouse_x = mouse_x
+		last_mouse_y = mouse_y
+		last_mouse_cap = mouse_cap
 		return
 	end
+
+	last_mouse_x = mouse_x
+	last_mouse_y = mouse_y
+	last_mouse_cap = mouse_cap
 
 	if mouse_cap & 1 == 1 then -- Left mouse down
 		if not mouse_down_time or mouse_down_time == 0 then
@@ -1779,16 +1931,16 @@ function handle_mouse()
 				dragging = true
 				drag_item_id = mouse_down_item
 
-				-- Calculate drag offset
-				local clicked_item_index = 0
-				for i, display_item in ipairs(display_list) do
+				-- Calculate drag offset using actual accumulated heights
+				local accumulated_y = 10 - scroll_offset
+				for _, display_item in ipairs(display_list) do
 					if display_item.id == mouse_down_item then
-						clicked_item_index = i
 						break
 					end
+					accumulated_y = accumulated_y + display_item.height
 				end
 
-				drag_offset_y = mouse_down_pos.y - (10 - scroll_offset + (clicked_item_index - 1) * item_height)
+				drag_offset_y = mouse_down_pos.y - accumulated_y
 			end
 
 			-- Update drop target while dragging
@@ -1846,23 +1998,7 @@ function handle_mouse()
 	end
 end
 
-function is_window_focused()
-	if is_docked() then
-		-- If docked, check if mouse is over our window area
-		-- This is a workaround since there's no direct focus detection for docked windows
-		return gfx.mouse_x >= 0 and gfx.mouse_x <= gfx.w and gfx.mouse_y >= 0 and gfx.mouse_y <= gfx.h
-	else
-		-- If undocked, assume it has focus when it's the active window
-		return true
-	end
-end
-
 function handle_keyboard()
-	-- Only handle keyboard input if window has focus
-	if not is_window_focused() then
-		return gfx.getchar() -- Still need to call getchar to prevent buildup, but don't process
-	end
-
 	local char = gfx.getchar()
 
 	-- Check if input changed
@@ -1884,11 +2020,29 @@ function handle_keyboard()
 			input_changed = true
 		end
 	elseif char == 9 then
-		-- Tab - add subtask (child)
-		if input_text ~= "" then
-			add_task(input_text, true, false)
-			input_text = ""
-			input_changed = true
+		local shift_held = gfx.mouse_cap & 8 == 8
+		if shift_held then
+			if input_text ~= "" then
+				-- Shift+Tab with text - add task at parent level (outdent)
+				add_task(input_text, false, true)
+				input_text = ""
+				input_changed = true
+			elseif selected_id then
+				-- Shift+Tab with no text - unindent selected task
+				unindent_task(selected_id)
+				input_changed = true
+			end
+		else
+			if input_text ~= "" then
+				-- Tab with text - add subtask (child)
+				add_task(input_text, true, false)
+				input_text = ""
+				input_changed = true
+			elseif selected_id then
+				-- Tab with no text - indent selected task
+				indent_task(selected_id)
+				input_changed = true
+			end
 		end
 	elseif char == 27 then -- Escape
 		-- Clear input or cancel drag
@@ -1935,8 +2089,7 @@ function main()
 	end
 
 	if not gui_open then
-		gfx.init(todolist_basename, window_w, window_h, 1)
-		gfx.dock(default_dock_state)
+		gfx.init(window_name, window_w, window_h, default_dock_state)
 		set_font()
 		gui_open = true
 		load_todo_data() -- Initial load
@@ -1947,15 +2100,24 @@ function main()
 	-- Check for deferred saves
 	check_deferred_save()
 
+	-- Blinking cursor needs periodic redraws
+	if current_view == "tasks" then
+		local blink_state = math.floor(r.time_precise() * 2) % 2
+		if not last_blink_state or blink_state ~= last_blink_state then
+			needs_redraw = true
+			last_blink_state = blink_state
+		end
+	end
+
 	-- Handle input
 	handle_mouse()
 	local char = handle_keyboard()
 
-	-- Only redraw if needed
+	-- Only redraw if needed, but always call gfx.update() to keep window responsive
 	if needs_redraw then
 		draw_gui()
-		gfx.update()
 	end
+	gfx.update()
 
 	if char >= 0 then
 		r.defer(main)
