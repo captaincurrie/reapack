@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie" commit="72610b8b33d26a696936a0624ca7b7c91e41dc82">
+<index version="1" name="CaptainCurrie" commit="3d324206469cd65e79ca99c1d099f16ccfcd7c8d">
   <category name="Development">
+    <reapack name="reasets.lua" type="script" desc="reasets - REAper track-SETS manager">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 reasets - REAper track-SETS manager\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="captaincurrie" time="2026-03-13T05:10:21Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/3d324206469cd65e79ca99c1d099f16ccfcd7c8d/Development/reasets.lua</source>
+      </version>
+    </reapack>
     <reapack name="reatask.lua" type="script" desc="reatask - reaper task manager">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
