@@ -1,6 +1,5 @@
-
 -- @description reasets - REAper track-SETS manager
--- @version 1.0
+-- @version 1.1
 -- @author captaincurrie
 -- @license GNU General Public License
 -- @date 2026-03-13
@@ -312,7 +311,7 @@ local CONFIG = {
 	SETTINGS_MIN_PANEL_WIDTH = 180, -- Minimum width for settings panel
 	SETTINGS_PANEL_PADDING = 20, -- Padding around settings content inside border
 	SETTINGS_PANEL_BORDER_COLOR = "5b5b5b", -- Border color for settings panel
-	SCROLL_SPEED = 20, -- Default scroll speed
+	SCROLL_SPEED = 10, -- Default scroll speed
 	DOUBLE_CLICK_TIME = 0.3, -- Time window for double-click detection (seconds)
 	BORDER_THICKNESS = 2, -- Border thickness in pixels
 
@@ -343,6 +342,8 @@ local CONFIG = {
 	-- Toolbar
 	TOOLBAR_HEIGHT = 30,
 	TOOLBAR_BUTTON_SIZE = 24,
+	TOOLBAR_BUTTON_SIZE_MIN = 12,
+	TOOLBAR_BUTTON_SIZE_MAX = 28,
 	TOOLBAR_BUTTON_PADDING = 3,
 	TOOLBAR_SPACING = 2, -- Space between buttons within a group
 	TOOLBAR_GROUP_SPACING = 12, -- Space between button groups
@@ -539,6 +540,14 @@ local STATE = {
 
 	-- Dock state
 	is_docked = false, -- Whether window is docked
+
+	-- Help view
+	help_scroll_offset = 0,
+	help_last_mouse_wheel = 0,
+	help_max_scroll = 0, -- Updated each draw; used to clamp wheel input immediately
+
+	-- Toolbar
+	toolbar_button_size = CONFIG.TOOLBAR_BUTTON_SIZE,
 
 	-- Mode state
 	ab_mode = false, -- Whether A/B mode is active (exclusive solo on click)
@@ -830,6 +839,9 @@ end
 -- ============================================================================
 -- SET MANAGEMENT
 -- ============================================================================
+
+-- Forward declaration: defined in FILE PERSISTENCE section below
+local request_save
 
 -- Get or create a unique ID for a track using extended state
 local function get_track_unique_id(track)
@@ -1461,6 +1473,7 @@ local function save_sets()
 			toolbar_position = STATE.toolbar_position,
 			auto_sort_by_color = STATE.auto_sort_by_color,
 			scroll_speed = STATE.scroll_speed,
+			toolbar_button_size = STATE.toolbar_button_size,
 			ab_mode = STATE.ab_mode,
 			auto_hide_tcp = STATE.auto_hide_tcp,
 			auto_hide_mcp = STATE.auto_hide_mcp,
@@ -1503,6 +1516,9 @@ local function load_sets()
 			STATE.toolbar_position = data.settings.toolbar_position or "top"
 			STATE.auto_sort_by_color = data.settings.auto_sort_by_color or false
 			STATE.scroll_speed = data.settings.scroll_speed or STATE.scroll_speed
+			if data.settings.toolbar_button_size then
+				STATE.toolbar_button_size = data.settings.toolbar_button_size
+			end
 			STATE.ab_mode = data.settings.ab_mode or false
 			STATE.auto_hide_tcp = data.settings.auto_hide_tcp or false
 			STATE.auto_hide_mcp = data.settings.auto_hide_mcp or false
@@ -1525,7 +1541,7 @@ end
 -- Debounced save function
 local SAVE_DELAY = 0.5 -- Save 500ms after last change
 
-local function request_save()
+request_save = function()
 	STATE.pending_save = true
 	STATE.last_change_time = reaper.time_precise()
 end
@@ -1811,6 +1827,18 @@ local function draw_sort_icon(x, y, size, is_active)
 	gfx.circle(start_x + spot_spacing * 1.5, row2_y, spot_radius, 1, 1)
 end
 
+local function draw_help_icon(x, y, size, is_active)
+	set_color(CONFIG.TOOLBAR_ICON_COLOR)
+	local font_size = math.floor(size * 0.55)
+	gfx.setfont(2, CONFIG.DEFAULT_FONT, font_size, "b")
+	local text = "?"
+	local text_w, text_h = gfx.measurestr(text)
+	gfx.x = x + (size - text_w) / 2
+	gfx.y = y + (size - text_h) / 2
+	gfx.drawstr(text)
+	gfx.setfont(1)
+end
+
 local function draw_dock_icon(x, y, size, is_active)
 	set_color(CONFIG.TOOLBAR_ICON_COLOR)
 
@@ -1943,6 +1971,16 @@ local TOOLBAR_BUTTON_GROUPS = {
 			end,
 		},
 	},
+	-- Group 5: Help
+	{
+		{
+			id = "help_view",
+			draw_icon = draw_help_icon,
+			get_active_state = function()
+				return STATE.view == "help"
+			end,
+		},
+	},
 }
 
 local function draw_toolbar()
@@ -1956,9 +1994,10 @@ local function draw_toolbar()
 	draw_rect_filled(0, toolbar_y, gfx.w, CONFIG.TOOLBAR_HEIGHT, CONFIG.TOOLBAR_BG_COLOR)
 
 	local buttons = {}
-	local button_y = toolbar_y + (CONFIG.TOOLBAR_HEIGHT - CONFIG.TOOLBAR_BUTTON_SIZE) / 2
+	local bsize = STATE.toolbar_button_size
+	local button_y = toolbar_y + (CONFIG.TOOLBAR_HEIGHT - bsize) / 2
 	local button_x = CONFIG.TOOLBAR_BUTTON_PADDING
-	local icon_padding = 4
+	local icon_padding = math.max(2, math.floor(bsize * 0.15))
 
 	-- Draw button groups
 	for group_idx, group in ipairs(TOOLBAR_BUTTON_GROUPS) do
@@ -1967,8 +2006,8 @@ local function draw_toolbar()
 			local button = {
 				x = button_x,
 				y = button_y,
-				w = CONFIG.TOOLBAR_BUTTON_SIZE,
-				h = CONFIG.TOOLBAR_BUTTON_SIZE,
+				w = bsize,
+				h = bsize,
 				action = btn_def.id,
 			}
 
@@ -1988,14 +2027,14 @@ local function draw_toolbar()
 			btn_def.draw_icon(
 				button.x + icon_padding,
 				button.y + icon_padding,
-				CONFIG.TOOLBAR_BUTTON_SIZE - icon_padding * 2,
+				bsize - icon_padding * 2,
 				btn_def.get_active_state()
 			)
 
 			table.insert(buttons, button)
 
 			-- Advance x position for next button in group
-			button_x = button_x + CONFIG.TOOLBAR_BUTTON_SIZE + CONFIG.TOOLBAR_SPACING
+			button_x = button_x + bsize + CONFIG.TOOLBAR_SPACING
 		end
 
 		-- Add group spacing (except after last group)
@@ -2413,12 +2452,12 @@ local function calculate_settings_elements()
 	}
 	y = y + slider_h + section
 
-	-- ── Scroll Speed slider ──────────────────────────────────────────────────
+	--  Scroll Speed slider 
 	elements.scroll_slider_label_y = y
 	y = y + label_h
 	elements.scroll_slider = {
 		x = padding, y = y, w = slider_w, h = slider_h,
-		min = 5, max = 50,
+		min = 1, max = 20,
 	}
 	y = y + slider_h + section
 
@@ -2434,7 +2473,16 @@ local function calculate_settings_elements()
 	elements.use_track_name_toggle_btn = { x = padding, y = y, w = ctrl_w, h = btn_h }
 	y = y + btn_h + section
 
-	-- ── Toolbar Position ─────────────────────────────────────────────────────
+	--  Toolbar Button Size slider 
+	elements.toolbar_btn_size_label_y = y
+	y = y + label_h
+	elements.toolbar_btn_size_slider = {
+		x = padding, y = y, w = slider_w, h = slider_h,
+		min = CONFIG.TOOLBAR_BUTTON_SIZE_MIN, max = CONFIG.TOOLBAR_BUTTON_SIZE_MAX,
+	}
+	y = y + slider_h + section
+
+	--  Toolbar Position 
 	elements.toolbar_label_y = y
 	y = y + label_h
 	elements.toolbar_top_btn    = { x = padding,                      y = y, w = third_w, h = btn_h }
@@ -2449,6 +2497,166 @@ local function calculate_settings_elements()
 	elements.max_scroll = math.max(0, elements.content_height - (gfx.h - 70))
 
 	return elements
+end
+
+-- ============================================================================
+-- HELP VIEW
+-- ============================================================================
+
+local HELP_CONTENT = {
+	{
+		heading = "WHAT IS REASETS?",
+		body = "Reasets lets you save named groups of tracks called sets and recall their selection instantly. Instead of manually hunting for tracks, one click selects exactly the group you need.",
+	},
+	{
+		heading = "CREATING A SET",
+		body = "Select one or more tracks in REAPER, then click the [+] button at the bottom of the set list. A set is created and named after the first selected track. You can also double-click any empty area of the set list to create a set.",
+	},
+	{
+		heading = "SELECTING A SET",
+		body = "Left-click a set to select it. REAPER will immediately select its tracks. Left-click the same set again to deselect it, which clears the track selection.",
+	},
+	{
+		heading = "RENAMING A SET",
+		body = "Right-click a set to enter rename mode. A text cursor appears. Type your new name, then press Enter to confirm or Escape to cancel. Double-click inside the name to select all text.",
+	},
+	{
+		heading = "DELETING A SET",
+		body = "Middle-click (scroll wheel click) a set to delete it immediately. The set is removed but your tracks are unaffected.",
+	},
+	{
+		heading = "OVERWRITING A SET",
+		body = "To update a set with a new track selection: select the tracks you want in REAPER, then hold Left mouse button on the set and press Middle mouse button. The set is updated in place.",
+	},
+	{
+		heading = "CHANGING A SET'S COLOR",
+		body = "Hold Left mouse button on a set, then Right-click it to assign a random color. To copy a color from one set to another, hold Left on the source set and Right-click the target set.",
+	},
+	{
+		heading = "MUTE & SOLO",
+		body = "Ctrl+Left-click a set to toggle mute on all its tracks. Ctrl+Right-click to toggle solo. Both toggle based on the current state — if all tracks are muted they will be unmuted, otherwise all will be muted.",
+	},
+	{
+		heading = "REORDERING SETS",
+		body = "Click and hold a set until it lifts, then drag it up or down to a new position. A blue insertion line shows where it will be dropped. Release to confirm. Manual reordering disables auto color-sort.",
+	},
+	{
+		heading = "A/B MODE (toolbar)",
+		body = "Click the A/B toolbar button to enable A/B mode. In this mode, selecting a set exclusively solos its tracks, making it easy to compare two groups by clicking between them. Selecting the active set deselects and un-solos everything.",
+	},
+	{
+		heading = "TCP HIDE / MCP HIDE (toolbar)",
+		body = "The TCP and MCP buttons auto-hide tracks not in the selected set. TCP affects the Track Control Panel on the left; MCP affects the Mixer. When you deselect the set, all tracks become visible again. Both can be active simultaneously.",
+	},
+	{
+		heading = "SORT BY COLOR (toolbar)",
+		body = "Left-click the palette button to toggle auto-sort mode — new sets are automatically placed in color order. Right-click to perform a one-time sort of the existing sets without enabling auto-sort.",
+	},
+	{
+		heading = "SETTINGS",
+		body = "Right-click anywhere outside the set list to open Settings. From there you can adjust the font size, set width and height, scroll speed, growth direction (sets grow down or up), toolbar position, and whether to show an All Tracks shortcut at the top of the list.",
+	},
+	{
+		heading = "SCROLLING",
+		body = "Use the mouse wheel to scroll the set list when there are more sets than fit on screen. The Settings and Help panels scroll the same way.",
+	},
+}
+
+local function wrap_text(text, max_width)
+	local lines = {}
+	local words = {}
+	for word in text:gmatch("%S+") do
+		table.insert(words, word)
+	end
+	local current_line = ""
+	for _, word in ipairs(words) do
+		local test = current_line == "" and word or (current_line .. " " .. word)
+		if gfx.measurestr(test) <= max_width then
+			current_line = test
+		else
+			if current_line ~= "" then
+				table.insert(lines, current_line)
+			end
+			current_line = word
+		end
+	end
+	if current_line ~= "" then
+		table.insert(lines, current_line)
+	end
+	return lines
+end
+
+local function draw_help_view()
+	draw_rect_filled(0, 0, gfx.w, gfx.h, CONFIG.COLOR_BG)
+
+	local border_left   = 6
+	local border_top    = 10
+	local border_width  = gfx.w - border_left * 2
+	local border_bottom = gfx.h - 50
+	local border_height = border_bottom - border_top
+
+	draw_rect_filled(border_left, border_top, border_width, border_height, CONFIG.COLOR_BG)
+	draw_rect_border(border_left, border_top, border_width, border_height,
+		CONFIG.SETTINGS_PANEL_BORDER_COLOR, CONFIG.BORDER_THICKNESS)
+
+	local padding    = 14
+	local max_w      = gfx.w - padding * 2
+	local scroll     = STATE.help_scroll_offset
+	local line_h     = gfx.texth
+	local section_gap = 14
+	local heading_gap = 4  -- gap between heading and body
+	local y          = 12  -- starting y in content space
+
+	-- Measure heading font (slightly larger) using same slot trick
+	local heading_font_size = math.min(STATE.font_size + 2, 32)
+
+	local function vis(elem_y, h)
+		local sy = elem_y - scroll
+		return sy + h > border_top + 4 and sy < border_bottom - 4
+	end
+
+	for _, section in ipairs(HELP_CONTENT) do
+		-- Draw heading
+		gfx.setfont(2, CONFIG.DEFAULT_FONT, heading_font_size, "b")
+		local h_line_h = gfx.texth
+
+		if vis(y, h_line_h) then
+			set_color(CONFIG.TOOLBAR_BUTTON_ACTIVE_COLOR)
+			gfx.x = padding
+			gfx.y = y - scroll
+			gfx.drawstr(section.heading)
+		end
+		y = y + h_line_h + heading_gap
+
+		-- Draw body (word-wrapped)
+		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
+		local body_lines = wrap_text(section.body, max_w)
+		for _, line in ipairs(body_lines) do
+			if vis(y, line_h) then
+				draw_text(padding, y - scroll, line, CONFIG.COLOR_TEXT)
+			end
+			y = y + line_h
+		end
+
+		y = y + section_gap
+	end
+
+	-- Restore main font
+	gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
+
+	-- Clamp scroll now that we know content height
+	local content_height = y
+	local visible_height = border_bottom - border_top - 10
+	local max_scroll = math.max(0, content_height - visible_height)
+	STATE.help_max_scroll = max_scroll
+	if STATE.help_scroll_offset > max_scroll then
+		STATE.help_scroll_offset = max_scroll
+	end
+
+	-- Footer
+	local help_text = "Right-click to close"
+	local help_w = gfx.measurestr(help_text)
+	draw_text((gfx.w - help_w) / 2, gfx.h - 35, help_text, CONFIG.COLOR_TEXT_GREY)
 end
 
 local function draw_settings_view()
@@ -2564,7 +2772,16 @@ local function draw_settings_view()
 			STATE.use_first_track_name)
 	end
 
-	-- ── Toolbar Position ─────────────────────────────────────────────────────
+	--  Toolbar Button Size slider 
+	draw_label(el.toolbar_btn_size_label_y, "Toolbar Button Size")
+	if vis(el.toolbar_btn_size_slider.y, el.toolbar_btn_size_slider.h) then
+		draw_slider(el.toolbar_btn_size_slider.x, el.toolbar_btn_size_slider.y - scroll,
+			el.toolbar_btn_size_slider.w, el.toolbar_btn_size_slider.h,
+			STATE.toolbar_button_size,
+			el.toolbar_btn_size_slider.min, el.toolbar_btn_size_slider.max)
+	end
+
+	--  Toolbar Position 
 	draw_label(el.toolbar_label_y, "Toolbar Position")
 	if vis(el.toolbar_top_btn.y, el.toolbar_top_btn.h) then
 		draw_button(el.toolbar_top_btn.x, el.toolbar_top_btn.y - scroll,
@@ -2596,6 +2813,9 @@ local function render()
 	if STATE.view == "settings" then
 		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.settings_font_size)
 		draw_settings_view()
+	elseif STATE.view == "help" then
+		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
+		draw_help_view()
 	else
 		gfx.setfont(1, CONFIG.DEFAULT_FONT, STATE.font_size)
 		STATE.toolbar_buttons = draw_main_view()
@@ -2696,6 +2916,19 @@ local function handle_mouse_wheel_scroll(view)
 			end
 
 			STATE.settings_last_mouse_wheel = mouse_wheel
+			STATE.dirty = true
+		end
+	elseif view == "help" then
+		if mouse_wheel ~= STATE.help_last_mouse_wheel then
+			local wheel_delta = mouse_wheel - STATE.help_last_mouse_wheel
+			STATE.help_scroll_offset = math.max(
+				0,
+				math.min(
+					STATE.help_max_scroll,
+					STATE.help_scroll_offset - (wheel_delta * STATE.scroll_speed)
+				)
+			)
+			STATE.help_last_mouse_wheel = mouse_wheel
 			STATE.dirty = true
 		end
 	else
@@ -2813,6 +3046,19 @@ local function handle_toolbar_button_click(button_id, is_left_click)
 			STATE.dirty = true
 			return true
 		end
+	elseif button_id == "help_view" then
+		if is_left_click then
+			if STATE.view == "help" then
+				STATE.view = "main"
+				STATE.last_mouse_wheel = gfx.mouse_wheel
+			else
+				STATE.view = "help"
+				STATE.help_scroll_offset = 0
+				STATE.help_last_mouse_wheel = gfx.mouse_wheel
+			end
+			STATE.dirty = true
+			return true
+		end
 	end
 
 	return false
@@ -2890,6 +3136,14 @@ local function handle_right_click(clicked_box, is_left_down)
 		return false -- Chord takes priority
 	end
 
+	-- Right-click in help view: return to main
+	if STATE.view == "help" then
+		STATE.view = "main"
+		STATE.last_mouse_wheel = gfx.mouse_wheel
+		STATE.dirty = true
+		return true
+	end
+
 	if clicked_box and clicked_box.set_id ~= CONFIG.ALL_TRACKS_SET_ID then
 		-- Right-click on set: enter edit mode
 		local set = find_set(clicked_box.set_id)
@@ -2915,9 +3169,15 @@ local function handle_right_click(clicked_box, is_left_down)
 			STATE.selection_dragging = false
 			STATE.dirty = true
 		else
-			STATE.view = (STATE.view == "main") and "settings" or "main"
-			STATE.settings_scroll_offset = 0
-			STATE.settings_cached_elements = nil
+			if STATE.view == "main" then
+				STATE.view = "settings"
+				STATE.settings_scroll_offset = 0
+				STATE.settings_cached_elements = nil
+				STATE.settings_last_mouse_wheel = gfx.mouse_wheel
+			else
+				STATE.view = "main"
+				STATE.last_mouse_wheel = gfx.mouse_wheel
+			end
 			STATE.dirty = true
 		end
 	end
@@ -3289,6 +3549,8 @@ local function handle_settings_interaction(mouse_x, mouse_y, is_left_down, is_le
 					STATE.cached_boxes = nil
 				elseif STATE.settings_dragging_slider == "scroll_slider" then
 					STATE.scroll_speed = value
+				elseif STATE.settings_dragging_slider == "toolbar_btn_size_slider" then
+					STATE.toolbar_button_size = value
 				end
 
 				STATE.dirty = true
@@ -3365,6 +3627,17 @@ local function handle_settings_interaction(mouse_x, mouse_y, is_left_down, is_le
 			local percent = math.max(0, math.min(1, relative_x / el.scroll_slider.w))
 			STATE.scroll_speed =
 				math.floor(el.scroll_slider.min + percent * (el.scroll_slider.max - el.scroll_slider.min))
+			STATE.dirty = true
+			request_save()
+			return true
+		elseif is_over(el.toolbar_btn_size_slider) then
+			STATE.settings_dragging_slider = "toolbar_btn_size_slider"
+			local relative_x = mouse_x - el.toolbar_btn_size_slider.x
+			local percent = math.max(0, math.min(1, relative_x / el.toolbar_btn_size_slider.w))
+			STATE.toolbar_button_size = math.floor(
+				el.toolbar_btn_size_slider.min
+				+ percent * (el.toolbar_btn_size_slider.max - el.toolbar_btn_size_slider.min)
+			)
 			STATE.dirty = true
 			request_save()
 			return true
@@ -3489,6 +3762,12 @@ local function handle_mouse_input()
 	-- Handle settings view
 	if STATE.view == "settings" then
 		handle_settings_interaction(mouse_x, mouse_y, is_left_down, is_left_press)
+		update_mouse_state(is_left_down, is_right_down, is_middle_down)
+		return
+	end
+
+	-- Absorb all input in help view (right-click already handled above)
+	if STATE.view == "help" then
 		update_mouse_state(is_left_down, is_right_down, is_middle_down)
 		return
 	end
@@ -3763,6 +4042,7 @@ local function main()
 		-- Sync mouse wheel to current value to avoid initial scroll jump
 		STATE.last_mouse_wheel = gfx.mouse_wheel
 		STATE.settings_last_mouse_wheel = gfx.mouse_wheel
+		STATE.help_last_mouse_wheel = gfx.mouse_wheel
 	end
 
 	-- Sync is_docked with actual gfx dock state (user may have docked/undocked
