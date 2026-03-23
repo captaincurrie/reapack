@@ -1,5 +1,5 @@
 -- @description reatask - reaper task manager
--- @version 1.1
+-- @version 1.3
 -- @author captaincurrie
 -- @license GPL v3
 -- @date 2025 12 28
@@ -67,6 +67,8 @@ local frame_time = 1.0 / target_fps -- Time per frame in seconds
 local last_frame_time = 0
 local force_next_frame = false -- Flag to bypass frame limiter for immediate updates
 
+-- Icon font settings
+local icon_font_name = "DejaVu Sans" -- Widely available on Linux; Segoe UI Symbol on Windows
 -- Font settings (global variables)
 local font_name = "Arial"
 local font_size = 16
@@ -91,6 +93,7 @@ local collapse_icon_y_offset = base_collapse_icon_y_offset
 local show_completed = true
 local sort_mode = "custom" -- "custom" or "alphabetical"
 local wrap_task_text = false -- Whether to wrap long task text
+local toolbar_position = "top" -- "top" or "bottom"
 
 -- Color settings
 local bg_color = "3e3e3e" -- Hex color format for main background
@@ -98,6 +101,7 @@ local text_color = "FFFFFF" -- Hex color format for main text
 local input_bar_bg_color = "3e3e3e" -- Hex color format for input bar
 local input_bar_border_color = "606060" -- Hex color format for input bar border
 local input_bar_border_thickness = 2 -- Thickness of input bar border in pixels
+local toolbar_bg_color = "3b3b3b" -- Hex color format for toolbar background
 
 -- View state
 local current_view = "tasks" -- "tasks" or "settings"
@@ -106,9 +110,14 @@ local settings_scroll_offset = 0
 -- Settings view interaction
 local font_slider_dragging = false
 local font_slider_value = 0 -- 0-1 range
+local input_height_slider_dragging = false
+local input_height_slider_value = 0 -- 0-1 range
+local toolbar_height_slider_dragging = false
+local toolbar_height_slider_value = 0 -- 0-1 range
 
 -- Undo system
 local undo_stack = {}
+local redo_stack = {}
 local max_undo_levels = 20
 
 -- Click/Drag detection variables
@@ -120,6 +129,15 @@ local move_threshold = 5 -- pixels to differentiate drag from click
 local last_click_time = 0
 local last_click_item = nil
 local double_click_threshold = 0.25 -- 250ms for double click
+
+-- Tooltip variables
+local tooltip_delay = 0.3 -- seconds before tooltip appears
+local tooltip_hover_start = 0
+local tooltip_current_btn = nil -- unique string key for currently hovered btn
+local tooltip_text = ""
+local tooltip_visible = false
+local tooltip_mouse_x = 0
+local tooltip_mouse_y = 0
 
 -- Drag and drop variables
 local dragging = false
@@ -142,6 +160,7 @@ local window_w = 300
 local window_h = 400
 local base_item_height = 24
 local base_input_height = 24
+local base_toolbar_height = 24
 local base_checkbox_size = 12
 local base_indent = 20
 local base_menu_width = 160
@@ -150,6 +169,7 @@ local base_menu_item_height = 20
 -- Scaled dimensions (will be calculated)
 local item_height = base_item_height
 local input_height = base_input_height
+local toolbar_height = base_toolbar_height
 local checkbox_size = base_checkbox_size
 local indent_size = base_indent
 local menu_width = base_menu_width
@@ -278,6 +298,7 @@ function update_scaled_dimensions()
 	-- Scale UI element sizes
 	item_height = math.floor(base_item_height * scale + 0.5)
 	input_height = math.floor(base_input_height * scale + 0.5)
+	toolbar_height = math.floor(base_toolbar_height * scale + 0.5)
 	checkbox_size = math.floor(base_checkbox_size * scale + 0.5)
 	indent_size = math.floor(base_indent * scale + 0.5)
 	menu_width = math.floor(base_menu_width * scale + 0.5)
@@ -324,33 +345,73 @@ function save_state_for_undo(action_description)
 	if #undo_stack > max_undo_levels then
 		table.remove(undo_stack, 1)
 	end
+
+	-- Any new action clears the redo stack
+	redo_stack = {}
 end
 
 function undo_last_action()
 	if #undo_stack == 0 then
-		return false -- Nothing to undo
+		return false
 	end
 
-	local last_state = table.remove(undo_stack) -- Remove and get last state
+	-- Save current state onto redo stack before restoring
+	local current = {
+		todo_items = deep_copy_table(todo_items),
+		root_items = deep_copy_table(root_items),
+		selected_id = selected_id,
+		next_id = next_id,
+		action = undo_stack[#undo_stack].action,
+		timestamp = r.time_precise(),
+	}
+	table.insert(redo_stack, current)
 
-	-- Preserve current selection if the task still exists
+	local last_state = table.remove(undo_stack)
+
+	-- Preserve current selection if the task still exists in restored state
 	local preserved_selection = nil
 	if selected_id and last_state.todo_items[selected_id] then
 		preserved_selection = selected_id
 	end
 
-	-- Restore the state
 	todo_items = last_state.todo_items
 	root_items = last_state.root_items
 	next_id = last_state.next_id
-
-	-- Apply preserved selection or fall back to saved selection
 	selected_id = preserved_selection or last_state.selected_id
 
 	mark_cache_dirty()
 	mark_needs_save()
 
 	return true, last_state.action
+end
+
+function redo_last_action()
+	if #redo_stack == 0 then
+		return false
+	end
+
+	-- Save current state onto undo stack before redoing
+	local current = {
+		todo_items = deep_copy_table(todo_items),
+		root_items = deep_copy_table(root_items),
+		selected_id = selected_id,
+		next_id = next_id,
+		action = redo_stack[#redo_stack].action,
+		timestamp = r.time_precise(),
+	}
+	table.insert(undo_stack, current)
+
+	local redo_state = table.remove(redo_stack)
+
+	todo_items = redo_state.todo_items
+	root_items = redo_state.root_items
+	next_id = redo_state.next_id
+	selected_id = redo_state.selected_id
+
+	mark_cache_dirty()
+	mark_needs_save()
+
+	return true, redo_state.action
 end
 
 function load_settings()
@@ -391,8 +452,14 @@ function load_settings()
 						input_bar_border_color = value
 					elseif key == "input_bar_border_thickness" then
 						input_bar_border_thickness = tonumber(value) or 2
-					elseif key == "wrap_task_text" then
-						wrap_task_text = value == "true"
+    				elseif key == "wrap_task_text" then
+    					wrap_task_text = value == "true"
+    				elseif key == "toolbar_position" then
+    					toolbar_position = value
+    				elseif key == "base_input_height" then
+						base_input_height = tonumber(value) or 24
+					elseif key == "base_toolbar_height" then
+						base_toolbar_height = tonumber(value) or 24
 					end
 				end
 			end
@@ -453,6 +520,9 @@ function save_settings_to_dir(reatask_dir)
 		file:write(string.format("input_bar_border_color:%s\n", input_bar_border_color))
 		file:write(string.format("input_bar_border_thickness:%d\n", input_bar_border_thickness))
 		file:write(string.format("wrap_task_text:%s\n", tostring(wrap_task_text)))
+		file:write(string.format("toolbar_position:%s\n", toolbar_position))
+		file:write(string.format("base_input_height:%d\n", base_input_height))
+		file:write(string.format("base_toolbar_height:%d\n", base_toolbar_height))
 		file:close()
 		return true
 	end
@@ -483,7 +553,8 @@ function load_todo_data()
 		todo_items = {}
 		root_items = {}
 		next_id = 1
-		undo_stack = {} -- Clear undo stack for new project
+		undo_stack = {} -- Clear undo/redo stacks for new project
+		redo_stack = {}
 		needs_save = false -- Old data already saved above
 		selected_id = nil
 		scroll_offset = 0
@@ -701,7 +772,7 @@ function get_display_list()
 end
 
 function get_scroll_limits(display_list)
-	local available_height = gfx.h - input_height - 20 -- Account for margins and input bar
+	local available_height = gfx.h - input_height - toolbar_height - 20 -- Account for margins, toolbar and input bar
 	
 	-- Calculate total content height based on actual item heights
 	local total_content_height = 0
@@ -732,6 +803,12 @@ function get_settings_scroll_limits()
 	-- Font Size Section
 	y_offset = y_offset + label_height + slider_height + section_spacing
 	
+	-- Input Bar Height Section
+	y_offset = y_offset + label_height + slider_height + section_spacing
+
+	-- Toolbar Height Section
+	y_offset = y_offset + label_height + slider_height + section_spacing
+
 	-- FPS Section
 	y_offset = y_offset + label_height + button_height + section_spacing
 	
@@ -824,6 +901,46 @@ function unindent_task(task_id)
 	table.insert(grandparent_list, insert_pos, task_id)
 
 	reorder_items()
+end
+
+function has_any_uncollapsed()
+	for _, item in pairs(todo_items) do
+		if #item.children > 0 and not item.collapsed then
+			return true
+		end
+	end
+	return false
+end
+
+function collapse_all_tasks()
+	save_state_for_undo("Collapse all")
+	for _, item in pairs(todo_items) do
+		if #item.children > 0 then
+			item.collapsed = true
+		end
+	end
+	mark_cache_dirty()
+	mark_needs_save()
+end
+
+function uncollapse_all_tasks()
+	save_state_for_undo("Uncollapse all")
+	for _, item in pairs(todo_items) do
+		item.collapsed = false
+	end
+	mark_cache_dirty()
+	mark_needs_save()
+end
+
+function clear_all_tasks()
+	save_state_for_undo("Clear all tasks")
+	todo_items = {}
+	root_items = {}
+	next_id = 1
+	selected_id = nil
+	scroll_offset = 0
+	mark_cache_dirty()
+	mark_needs_save()
 end
 
 function toggle_collapse(item_id)
@@ -1092,7 +1209,6 @@ function draw_button(x, y, w, h, text, is_active, mouse_over)
 	-- Truncate text if it's too wide
 	local display_text = text
 	if text_w > available_width then
-		-- Binary search for the right length
 		local left, right = 1, #text
 		while left < right do
 			local mid = math.floor((left + right + 1) / 2)
@@ -1111,6 +1227,66 @@ function draw_button(x, y, w, h, text, is_active, mouse_over)
 	gfx.x = x + (w - text_w) / 2
 	gfx.y = y + (h - text_h) / 2
 	gfx.drawstr(display_text)
+end
+
+-- Map icon type names to Unicode characters
+local icon_chars = {
+	trash      = "\xe2\x9c\x95",    -- ✕  U+2715
+	collapse   = "\xe2\x96\xb2",    -- ▲  U+25B2
+	expand     = "\xe2\x96\xbc",    -- ▼  U+25BC
+	eye_open   = "\xe2\x97\x89",    -- ◉  U+25C9
+	eye_closed = "\xe2\x97\x8e",    -- ◎  U+25CE
+	dock       = "\xe2\x8a\x9f",    -- ⊟  U+229F
+	undock     = "\xe2\x8a\x9e",    -- ⊞  U+229E
+	undo       = "\xe2\x86\xa9",    -- ↩  U+21A9
+	redo       = "\xe2\x86\xaa",    -- ↪  U+21AA
+}
+
+function draw_icon_button(x, y, w, h, icon_type, is_active, mouse_over, disabled)
+	-- Background
+	if disabled then
+		gfx.set(0.22, 0.22, 0.28, 1)
+	elseif is_active then
+		gfx.set(0.2, 0.5, 0.2, 1)
+	elseif mouse_over then
+		gfx.set(0.5, 0.5, 0.6, 1)
+	else
+		gfx.set(0.3, 0.3, 0.4, 1)
+	end
+	gfx.rect(x, y, w, h)
+
+	-- Border
+	if disabled then
+		gfx.set(0.35, 0.35, 0.4, 1)
+	else
+		gfx.set(0.6, 0.6, 0.6, 1)
+	end
+	gfx.rect(x, y, w, 1)
+	gfx.rect(x, y, 1, h)
+	gfx.rect(x + w - 1, y, 1, h)
+	gfx.rect(x, y + h - 1, w, 1)
+
+	-- Icon colour (dimmed when disabled)
+	local ir, ig, ib = hex_to_rgb(text_color)
+	if disabled then
+		gfx.set(ir * 0.35, ig * 0.35, ib * 0.35, 1)
+	else
+		gfx.set(ir, ig, ib, 1)
+	end
+
+	-- Choose a font size that fits snugly inside the button
+	local icon_size = math.floor(math.min(w, h) * 0.62 + 0.5)
+	icon_size = math.max(8, icon_size)
+	gfx.setfont(2, icon_font_name, icon_size)
+
+	local ch = icon_chars[icon_type] or "?"
+	local cw, ch_h = gfx.measurestr(ch)
+	gfx.x = math.floor(x + (w - cw) / 2 + 0.5)
+	gfx.y = math.floor(y + (h - ch_h) / 2 + 0.5)
+	gfx.drawstr(ch)
+
+	-- Restore main font
+	gfx.setfont(1, font_name, font_size)
 end
 
 function draw_settings_view()
@@ -1180,7 +1356,67 @@ function draw_settings_view()
 	gfx.rect(handle_x, slider_y, 10, slider_h)
 	
 	y_offset = y_offset + slider_h + section_spacing
-	
+
+	-- Input Bar Height Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Input Bar Height: " .. base_input_height)
+	y_offset = y_offset + label_height
+
+	local ih_slider_x = margin
+	local ih_slider_y = y_offset
+	local ih_slider_w = content_width
+	local ih_slider_h = slider_height
+
+	gfx.set(0.2, 0.2, 0.2, 1)
+	gfx.rect(ih_slider_x, ih_slider_y, ih_slider_w, ih_slider_h)
+	gfx.set(0.6, 0.6, 0.6, 1)
+	gfx.rect(ih_slider_x, ih_slider_y, ih_slider_w, 1)
+	gfx.rect(ih_slider_x, ih_slider_y, 1, ih_slider_h)
+	gfx.rect(ih_slider_x + ih_slider_w - 1, ih_slider_y, 1, ih_slider_h)
+	gfx.rect(ih_slider_x, ih_slider_y + ih_slider_h - 1, ih_slider_w, 1)
+
+	local ih_min, ih_max = 12, 64
+	input_height_slider_value = (base_input_height - ih_min) / (ih_max - ih_min)
+	local ih_handle_x = ih_slider_x + (ih_slider_w - 10) * input_height_slider_value
+	gfx.set(0.4, 0.4, 0.6, 1)
+	gfx.rect(ih_slider_x + 2, ih_slider_y + 2, ih_handle_x - ih_slider_x, ih_slider_h - 4)
+	gfx.set(0.7, 0.7, 0.8, 1)
+	gfx.rect(ih_handle_x, ih_slider_y, 10, ih_slider_h)
+
+	y_offset = y_offset + ih_slider_h + section_spacing
+
+	-- Toolbar Height Section
+	gfx.set(text_r, text_g, text_b, 1)
+	gfx.x = margin
+	gfx.y = y_offset
+	gfx.drawstr("Toolbar Height: " .. base_toolbar_height)
+	y_offset = y_offset + label_height
+
+	local th_slider_x = margin
+	local th_slider_y = y_offset
+	local th_slider_w = content_width
+	local th_slider_h = slider_height
+
+	gfx.set(0.2, 0.2, 0.2, 1)
+	gfx.rect(th_slider_x, th_slider_y, th_slider_w, th_slider_h)
+	gfx.set(0.6, 0.6, 0.6, 1)
+	gfx.rect(th_slider_x, th_slider_y, th_slider_w, 1)
+	gfx.rect(th_slider_x, th_slider_y, 1, th_slider_h)
+	gfx.rect(th_slider_x + th_slider_w - 1, th_slider_y, 1, th_slider_h)
+	gfx.rect(th_slider_x, th_slider_y + th_slider_h - 1, th_slider_w, 1)
+
+	local tth_min, tth_max = 12, 64
+	toolbar_height_slider_value = (base_toolbar_height - tth_min) / (tth_max - tth_min)
+	local th_handle_x = th_slider_x + (th_slider_w - 10) * toolbar_height_slider_value
+	gfx.set(0.4, 0.4, 0.6, 1)
+	gfx.rect(th_slider_x + 2, th_slider_y + 2, th_handle_x - th_slider_x, th_slider_h - 4)
+	gfx.set(0.7, 0.7, 0.8, 1)
+	gfx.rect(th_handle_x, th_slider_y, 10, th_slider_h)
+
+	y_offset = y_offset + th_slider_h + section_spacing
+
 	-- FPS Section
 	gfx.set(text_r, text_g, text_b, 1)
 	gfx.x = margin
@@ -1255,6 +1491,19 @@ function draw_settings_view()
 	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
 		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
 	draw_button(margin, y_offset, content_width, button_height, dock_text, false, mouse_over)
+	y_offset = y_offset + button_height + button_spacing
+
+	-- Toolbar position buttons
+	local tb_pos_w = (content_width - button_spacing) / 2
+	local tb_pos_labels = {"Toolbar: Top", "Toolbar: Bottom"}
+	local tb_pos_values = {"top", "bottom"}
+	for i = 1, 2 do
+		local btn_x = margin + (i - 1) * (tb_pos_w + button_spacing)
+		local is_active = (toolbar_position == tb_pos_values[i])
+		mouse_over = gfx.mouse_x >= btn_x and gfx.mouse_x <= btn_x + tb_pos_w
+			and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
+		draw_button(btn_x, y_offset, tb_pos_w, button_height, tb_pos_labels[i], is_active, mouse_over)
+	end
 	y_offset = y_offset + button_height + section_spacing
 	
 	-- Undo info
@@ -1317,7 +1566,7 @@ function handle_settings_mouse()
 	
 	-- Skip font size label
 	y_offset = y_offset + label_height
-	
+
 	-- Font slider interaction
 	local slider_x = margin
 	local slider_y = y_offset
@@ -1349,7 +1598,73 @@ function handle_settings_mouse()
 	end
 	
 	y_offset = y_offset + slider_h + section_spacing
-	
+
+	-- Input bar height slider interaction
+	local ih_slider_x = margin
+	local ih_slider_y = y_offset
+	local ih_slider_w = content_width
+	local ih_slider_h = slider_height
+
+	y_offset = y_offset + label_height -- skip label
+
+	if mouse_cap & 1 == 1 then
+		if mouse_x >= ih_slider_x and mouse_x <= ih_slider_x + ih_slider_w
+			and mouse_y >= ih_slider_y + label_height and mouse_y <= ih_slider_y + label_height + ih_slider_h then
+			input_height_slider_dragging = true
+		end
+
+		if input_height_slider_dragging then
+			local new_value = (mouse_x - ih_slider_x) / ih_slider_w
+			new_value = math.max(0, math.min(1, new_value))
+			local ih_min, ih_max = 12, 64
+			local new_h = math.floor(ih_min + new_value * (ih_max - ih_min) + 0.5)
+			if new_h ~= base_input_height then
+				base_input_height = new_h
+				update_scaled_dimensions()
+				mark_cache_dirty()
+				save_settings_deferred()
+				request_immediate_update()
+			end
+		end
+	else
+		input_height_slider_dragging = false
+	end
+
+	y_offset = y_offset + ih_slider_h + section_spacing
+
+	-- Toolbar height slider interaction
+	local tth_slider_x = margin
+	local tth_slider_y = y_offset
+	local tth_slider_w = content_width
+	local tth_slider_h = slider_height
+
+	y_offset = y_offset + label_height -- skip label
+
+	if mouse_cap & 1 == 1 then
+		if mouse_x >= tth_slider_x and mouse_x <= tth_slider_x + tth_slider_w
+			and mouse_y >= tth_slider_y + label_height and mouse_y <= tth_slider_y + label_height + tth_slider_h then
+			toolbar_height_slider_dragging = true
+		end
+
+		if toolbar_height_slider_dragging then
+			local new_value = (mouse_x - tth_slider_x) / tth_slider_w
+			new_value = math.max(0, math.min(1, new_value))
+			local tth_min, tth_max = 12, 64
+			local new_h = math.floor(tth_min + new_value * (tth_max - tth_min) + 0.5)
+			if new_h ~= base_toolbar_height then
+				base_toolbar_height = new_h
+				update_scaled_dimensions()
+				mark_cache_dirty()
+				save_settings_deferred()
+				request_immediate_update()
+			end
+		end
+	else
+		toolbar_height_slider_dragging = false
+	end
+
+	y_offset = y_offset + tth_slider_h + section_spacing
+
 	-- Skip FPS label
 	y_offset = y_offset + label_height
 	
@@ -1438,6 +1753,23 @@ function handle_settings_mouse()
 			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
 			toggle_dock()
 			request_immediate_update()
+		end
+	end
+	y_offset = y_offset + button_height + 10
+
+	-- Toolbar position buttons
+	local tb_pos_w = (content_width - 10) / 2
+	local tb_pos_values = {"top", "bottom"}
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		for i = 1, 2 do
+			local btn_x = margin + (i - 1) * (tb_pos_w + 10)
+			if mouse_x >= btn_x and mouse_x <= btn_x + tb_pos_w
+				and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
+				toolbar_position = tb_pos_values[i]
+				mark_cache_dirty()
+				save_settings_deferred()
+				request_immediate_update()
+			end
 		end
 	end
 	y_offset = y_offset + button_height + section_spacing
@@ -1644,6 +1976,102 @@ function draw_collapse_icon(x, y, collapsed)
 	end
 end
 
+function get_hovered_toolbar_btn(mouse_x, mouse_y)
+	local toolbar_y = toolbar_position == "top" and 0 or (gfx.h - input_height - toolbar_height)
+	if mouse_y < toolbar_y or mouse_y >= toolbar_y + toolbar_height then
+		return nil, nil
+	end
+
+	local tb_padding = 3
+	local tb_btn_h = toolbar_height - tb_padding * 2
+	local tb_btn_w = tb_btn_h
+	local tb_btn_y = toolbar_y + tb_padding
+
+	if mouse_y < tb_btn_y or mouse_y > tb_btn_y + tb_btn_h then
+		return nil, nil
+	end
+
+	-- Left group: undo, redo
+	local left_btns = {
+		{key = "undo", label = "Undo"},
+		{key = "redo", label = "Redo"},
+	}
+	for i, btn in ipairs(left_btns) do
+		local bx = tb_padding + (i - 1) * (tb_btn_w + tb_padding)
+		if mouse_x >= bx and mouse_x <= bx + tb_btn_w then
+			return btn.key, btn.label
+		end
+	end
+
+	-- Center group: trash, collapse, eye
+	local group_gap      = tb_padding * 3
+	local left_group_end = tb_padding + 2 * (tb_btn_w + tb_padding)
+	local center_group_w = 3 * tb_btn_w + 2 * tb_padding
+	local right_start    = gfx.w - tb_padding - tb_btn_w
+	local ideal_center   = math.floor((gfx.w - center_group_w) / 2 + 0.5)
+	local center_start   = math.max(ideal_center, left_group_end + group_gap)
+	center_start         = math.min(center_start, right_start - group_gap - center_group_w)
+
+	local center_btns = {
+		{key = "trash",    label = "Clear All Tasks"},
+		{key = "collapse", label = has_any_uncollapsed() and "Collapse All" or "Expand All"},
+		{key = "eye",      label = show_completed and "Hide Completed" or "Show Completed"},
+	}
+	for i, btn in ipairs(center_btns) do
+		local bx = center_start + (i - 1) * (tb_btn_w + tb_padding)
+		if mouse_x >= bx and mouse_x <= bx + tb_btn_w then
+			return btn.key, btn.label
+		end
+	end
+
+	-- Right group: dock
+	if mouse_x >= right_start and mouse_x <= right_start + tb_btn_w then
+		return "dock", is_docked() and "Undock Window" or "Dock Window"
+	end
+
+	return nil, nil
+end
+
+function draw_tooltip()
+	if not tooltip_visible or tooltip_text == "" then return end
+
+	set_font()
+	local tw, th = gfx.measurestr(tooltip_text)
+	local pad   = 5
+	local box_w = tw + pad * 2
+	local box_h = th + pad * 2
+
+	-- Horizontally centre on mouse, clamped inside window with a 2px margin
+	local tx = math.floor(tooltip_mouse_x - box_w / 2)
+	tx = math.max(2, math.min(tx, gfx.w - box_w - 2))
+
+	-- Place just below toolbar when it's on top, just above it when at bottom
+	local ty
+	if toolbar_position == "top" then
+		ty = toolbar_height + 4
+	else
+		ty = gfx.h - input_height - toolbar_height - box_h - 4
+	end
+
+	-- Background
+	gfx.set(0.12, 0.12, 0.12, 1)
+	gfx.rect(tx, ty, box_w, box_h)
+
+	-- Border
+	gfx.set(0.55, 0.55, 0.55, 1)
+	gfx.rect(tx,              ty,              box_w, 1)
+	gfx.rect(tx,              ty,              1,     box_h)
+	gfx.rect(tx + box_w - 1, ty,              1,     box_h)
+	gfx.rect(tx,              ty + box_h - 1, box_w, 1)
+
+	-- Text
+	local tr, tg, tb = hex_to_rgb(text_color)
+	gfx.set(tr, tg, tb, 1)
+	gfx.x = tx + pad
+	gfx.y = ty + pad
+	gfx.drawstr(tooltip_text)
+end
+
 function draw_gui()
 	needs_redraw = false -- Reset redraw flag
 	
@@ -1667,11 +2095,13 @@ function draw_gui()
 	gfx.rect(0, 0, gfx.w, gfx.h)
 
 	local display_list = get_display_list()
-	local y = 10 - scroll_offset
+	local task_area_top    = toolbar_position == "top" and toolbar_height or 0
+	local task_area_bottom = toolbar_position == "top" and (gfx.h - input_height) or (gfx.h - input_height - toolbar_height)
+	local y = task_area_top + 10 - scroll_offset
 
 	-- Draw drop indicator
 	if dragging and drop_target then
-		local temp_y = 10 - scroll_offset
+		local temp_y = task_area_top + 10 - scroll_offset
 
 		for _, display_item in ipairs(display_list) do
 			if display_item.id == drop_target.id then
@@ -1719,8 +2149,8 @@ function draw_gui()
 		local current_height = display_item.height
 		local x = 10 + (level * indent_size)
 
-		-- Skip if outside visible area, or if it's the item being dragged
-		if y > -current_height and y < gfx.h - input_height and display_item.id ~= drag_item_id then
+		-- Skip if outside visible area (including toolbar), or if it's the item being dragged
+		if y > task_area_top - current_height and y < task_area_bottom and display_item.id ~= drag_item_id then
 			-- Selection highlight
 			if display_item.id == selected_id then
 				gfx.set(0.3, 0.3, 0.5, 1)
@@ -1816,6 +2246,59 @@ function draw_gui()
 		gfx.drawstr(drag_item.text)
 	end
 
+	-- Toolbar (top or bottom)
+	local toolbar_y = toolbar_position == "top" and 0 or (gfx.h - input_height - toolbar_height)
+	local tb_bg_r, tb_bg_g, tb_bg_b = hex_to_rgb(toolbar_bg_color)
+	gfx.set(tb_bg_r, tb_bg_g, tb_bg_b, 1)
+	gfx.rect(0, toolbar_y, gfx.w, toolbar_height)
+
+	-- Draw 6 small square icon buttons, left-aligned with padding
+	local tb_padding = 3
+	local tb_btn_h = toolbar_height - tb_padding * 2
+	local tb_btn_w = tb_btn_h -- square buttons
+	local tb_btn_y = toolbar_y + tb_padding
+
+	local collapse_icon = has_any_uncollapsed() and "collapse" or "expand"
+	local eye_icon      = show_completed and "eye_open" or "eye_closed"
+	local dock_icon     = is_docked() and "undock" or "dock"
+
+	-- Define the three groups
+	local left_btns = {
+		{icon = "undo", disabled = #undo_stack == 0},
+		{icon = "redo", disabled = #redo_stack == 0},
+	}
+	local center_btns = {
+		{icon = "trash",       disabled = false},
+		{icon = collapse_icon, disabled = false},
+		{icon = eye_icon,      disabled = false},
+	}
+	local right_btns = {
+		{icon = dock_icon, disabled = false},
+	}
+
+	-- Calculate group positions
+	local group_gap      = tb_padding * 3 -- minimum space between groups
+	local left_group_end = tb_padding + #left_btns * (tb_btn_w + tb_padding)
+	local center_group_w = #center_btns * tb_btn_w + (#center_btns - 1) * tb_padding
+	local right_start    = gfx.w - tb_padding - tb_btn_w
+	local ideal_center   = math.floor((gfx.w - center_group_w) / 2 + 0.5)
+	local center_start   = math.max(ideal_center, left_group_end + group_gap)
+	center_start         = math.min(center_start, right_start - group_gap - center_group_w)
+
+	local function draw_btn_group(btns, start_x)
+		for i, btn in ipairs(btns) do
+			local bx = start_x + (i - 1) * (tb_btn_w + tb_padding)
+			local mo = not btn.disabled
+				and gfx.mouse_x >= bx and gfx.mouse_x <= bx + tb_btn_w
+				and gfx.mouse_y >= tb_btn_y and gfx.mouse_y <= tb_btn_y + tb_btn_h
+			draw_icon_button(bx, tb_btn_y, tb_btn_w, tb_btn_h, btn.icon, false, mo, btn.disabled)
+		end
+	end
+
+	draw_btn_group(left_btns,   tb_padding)
+	draw_btn_group(center_btns, center_start)
+	draw_btn_group(right_btns,  right_start)
+
 	-- Input bar at bottom (always appears active)
 	local input_y = gfx.h - input_height
 	local input_r, input_g, input_b = hex_to_rgb(input_bar_bg_color)
@@ -1843,6 +2326,9 @@ function draw_gui()
 		display_text = display_text .. "|"
 	end
 	gfx.drawstr(display_text)
+
+	-- Tooltip drawn last so it sits on top of everything
+	draw_tooltip()
 end
 
 function handle_mouse()
@@ -1854,6 +2340,33 @@ function handle_mouse()
 	-- Check if mouse state changed
 	local mouse_moved = (mouse_x ~= last_mouse_x or mouse_y ~= last_mouse_y)
 	local mouse_cap_changed = (mouse_cap ~= last_mouse_cap)
+
+	-- Tooltip hover tracking (tasks view only) - must run before the early-return
+	-- guard so the timer is checked even when the mouse is stationary
+	if current_view == "tasks" then
+		local btn_key, btn_label = get_hovered_toolbar_btn(mouse_x, mouse_y)
+		if btn_key ~= tooltip_current_btn then
+			tooltip_current_btn = btn_key
+			tooltip_text        = btn_label or ""
+			tooltip_hover_start = btn_key and r.time_precise() or 0
+			tooltip_visible     = false
+			tooltip_mouse_x     = mouse_x
+			tooltip_mouse_y     = mouse_y
+			needs_redraw        = true
+		elseif btn_key then
+			tooltip_mouse_x = mouse_x
+			tooltip_mouse_y = mouse_y
+			if not tooltip_visible and (r.time_precise() - tooltip_hover_start) >= tooltip_delay then
+				tooltip_visible = true
+				needs_redraw    = true
+			end
+		else
+			if tooltip_visible then
+				tooltip_visible = false
+				needs_redraw    = true
+			end
+		end
+	end
 
 	if not mouse_moved and not mouse_cap_changed and not dragging and current_view == "tasks" then
 		return -- Nothing to do
@@ -1884,6 +2397,83 @@ function handle_mouse()
 
 	local display_list = get_display_list()
 
+	-- Toolbar left-click handling (edge-triggered)
+	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
+		local toolbar_y = toolbar_position == "top" and 0 or (gfx.h - input_height - toolbar_height)
+		if mouse_y >= toolbar_y and mouse_y < toolbar_y + toolbar_height then
+			local tb_padding = 3
+			local tb_btn_h = toolbar_height - tb_padding * 2
+			local tb_btn_w = tb_btn_h -- square
+			local tb_btn_y = toolbar_y + tb_padding
+
+				-- Left group: undo, redo
+			local left_actions = {"undo", "redo"}
+			for i, action in ipairs(left_actions) do
+				local bx = tb_padding + (i - 1) * (tb_btn_w + tb_padding)
+				if mouse_x >= bx and mouse_x <= bx + tb_btn_w
+					and mouse_y >= tb_btn_y and mouse_y <= tb_btn_y + tb_btn_h then
+					if action == "undo" and #undo_stack > 0 then
+						undo_last_action()
+					elseif action == "redo" and #redo_stack > 0 then
+						redo_last_action()
+					end
+					last_mouse_x = mouse_x
+					last_mouse_y = mouse_y
+					last_mouse_cap = mouse_cap
+					request_immediate_update()
+					return
+				end
+			end
+
+			-- Center group: trash, collapse, eye
+			local group_gap      = tb_padding * 3
+			local left_group_end = tb_padding + 2 * (tb_btn_w + tb_padding)
+			local center_group_w = 3 * tb_btn_w + 2 * tb_padding
+			local right_start_c  = gfx.w - tb_padding - tb_btn_w
+			local ideal_center   = math.floor((gfx.w - center_group_w) / 2 + 0.5)
+			local center_start   = math.max(ideal_center, left_group_end + group_gap)
+			center_start         = math.min(center_start, right_start_c - group_gap - center_group_w)
+			local center_actions = {"trash", "collapse", "eye"}
+			for i, action in ipairs(center_actions) do
+				local bx = center_start + (i - 1) * (tb_btn_w + tb_padding)
+				if mouse_x >= bx and mouse_x <= bx + tb_btn_w
+					and mouse_y >= tb_btn_y and mouse_y <= tb_btn_y + tb_btn_h then
+					if action == "trash" then
+						clear_all_tasks()
+					elseif action == "collapse" then
+						if has_any_uncollapsed() then
+							collapse_all_tasks()
+						else
+							uncollapse_all_tasks()
+						end
+					elseif action == "eye" then
+						save_state_for_undo("Toggle show completed")
+						show_completed = not show_completed
+						mark_cache_dirty()
+						save_settings_deferred()
+					end
+					last_mouse_x = mouse_x
+					last_mouse_y = mouse_y
+					last_mouse_cap = mouse_cap
+					request_immediate_update()
+					return
+				end
+			end
+
+			-- Right group: dock
+			local right_x = gfx.w - tb_padding - tb_btn_w
+			if mouse_x >= right_x and mouse_x <= right_x + tb_btn_w
+				and mouse_y >= tb_btn_y and mouse_y <= tb_btn_y + tb_btn_h then
+				toggle_dock()
+				last_mouse_x = mouse_x
+				last_mouse_y = mouse_y
+				last_mouse_cap = mouse_cap
+				request_immediate_update()
+				return
+			end
+		end
+	end
+
 	-- Middle click for delete (edge-triggered, check BEFORE updating last_mouse_cap)
 	if mouse_cap & 64 == 64 and last_mouse_cap & 64 == 0 then -- Middle mouse button press
 		local click_info = get_item_at_position(mouse_x, mouse_y, display_list)
@@ -1901,11 +2491,21 @@ function handle_mouse()
 	last_mouse_cap = mouse_cap
 
 	if mouse_cap & 1 == 1 then -- Left mouse down
+		local task_area_top    = toolbar_position == "top" and toolbar_height or 0
+		local task_area_bottom = toolbar_position == "top" and (gfx.h - input_height) or (gfx.h - input_height - toolbar_height)
 		if not mouse_down_time or mouse_down_time == 0 then
 			-- Start of mouse down
 			mouse_down_time = current_time
 			mouse_down_pos.x = mouse_x
 			mouse_down_pos.y = mouse_y
+
+			-- Ignore clicks outside the task area (toolbar or input bar)
+			if mouse_y < task_area_top or mouse_y >= task_area_bottom then
+				last_mouse_x = mouse_x
+				last_mouse_y = mouse_y
+				last_mouse_cap = mouse_cap
+				return
+			end
 
 			local click_info = get_item_at_position(mouse_x, mouse_y, display_list)
 			if click_info then
@@ -2107,6 +2707,11 @@ function main()
 			needs_redraw = true
 			last_blink_state = blink_state
 		end
+	end
+
+	-- Tooltip delay: keep redrawing while hovering and tooltip not yet visible
+	if current_view == "tasks" and tooltip_current_btn and not tooltip_visible then
+		needs_redraw = true
 	end
 
 	-- Handle input
