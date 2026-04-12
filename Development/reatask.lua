@@ -1,5 +1,5 @@
 -- @description reatask - reaper task manager
--- @version 1.4
+-- @version 1.5
 -- @author captaincurrie
 -- @license GPL v3
 -- @date 2025 12 28
@@ -815,8 +815,8 @@ function get_settings_scroll_limits()
 	-- Sort Section
 	y_offset = y_offset + label_height + button_height + section_spacing
 	
-	-- Display Section (show completed + wrap + dock buttons)
-	y_offset = y_offset + label_height + button_height + 10 + button_height + 10 + button_height + section_spacing
+	-- Toolbar position section
+	y_offset = y_offset + label_height + button_height + section_spacing
 	
 	-- Undo Section (if available)
 	if #undo_stack > 0 then
@@ -1108,7 +1108,8 @@ function move_item(item_id, target_id, position)
 end
 
 function get_drop_target(mouse_y, display_list)
-	local item_y = 10 - scroll_offset
+	local task_area_top = toolbar_position == "top" and toolbar_height or 0
+	local item_y = task_area_top + 10 - scroll_offset
 
 	for i, display_item in ipairs(display_list) do
 		local item_top = item_y
@@ -1135,7 +1136,8 @@ function get_drop_target(mouse_y, display_list)
 end
 
 function get_item_at_position(mouse_x, mouse_y, display_list)
-	local item_y = 10 - scroll_offset
+	local task_area_top = toolbar_position == "top" and toolbar_height or 0
+	local item_y = task_area_top + 10 - scroll_offset
 
 	for i, display_item in ipairs(display_list) do
 		local item_top = item_y
@@ -1240,6 +1242,8 @@ local icon_chars = {
 	undock     = "\xe2\x8a\x9e",    -- ⊞  U+229E
 	undo       = "\xe2\x86\xa9",    -- ↩  U+21A9
 	redo       = "\xe2\x86\xaa",    -- ↪  U+21AA
+	wrap_on    = "\xe2\x86\xbb",    --   U+21BB
+	wrap_off   = "\xe2\x86\xbb",    --   U+21BB
 }
 
 function draw_icon_button(x, y, w, h, icon_type, is_active, mouse_over, disabled)
@@ -1281,8 +1285,14 @@ function draw_icon_button(x, y, w, h, icon_type, is_active, mouse_over, disabled
 
 	local ch = icon_chars[icon_type] or "?"
 	local cw, ch_h = gfx.measurestr(ch)
+	-- Some geometric symbols (circles, triangles) report a line-height that
+	-- includes descender space they don't use, making naive centering place
+	-- them too low. Apply an upward shift only to those icons.
+	local needs_shift = (icon_type == "collapse" or icon_type == "expand"
+		or icon_type == "eye_open" or icon_type == "eye_closed")
+	local descent_comp = needs_shift and math.floor(ch_h * 0.12 + 0.5) or 0
 	gfx.x = math.floor(x + (w - cw) / 2 + 0.5)
-	gfx.y = math.floor(y + (h - ch_h) / 2 + 0.5)
+	gfx.y = math.floor(y + (h - ch_h) / 2 - descent_comp + 0.5)
 	gfx.drawstr(ch)
 
 	-- Restore main font
@@ -1465,42 +1475,21 @@ function draw_settings_view()
 	
 	y_offset = y_offset + button_height + section_spacing
 	
-	-- Other Settings Section
+	-- Toolbar position
 	gfx.set(text_r, text_g, text_b, 1)
 	gfx.x = margin
 	gfx.y = y_offset
-	gfx.drawstr("Display:")
+	gfx.drawstr("Toolbar Position:")
 	y_offset = y_offset + label_height
-	
-	-- Show/Hide completed button
-	local toggle_text = show_completed and "Hide Completed" or "Show Completed"
-	local mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
-		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
-	draw_button(margin, y_offset, content_width, button_height, toggle_text, false, mouse_over)
-	y_offset = y_offset + button_height + button_spacing
-	
-	-- Text wrap button
-	local wrap_btn_text = wrap_task_text and "Disable Text Wrap" or "Enable Text Wrap"
-	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
-		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
-	draw_button(margin, y_offset, content_width, button_height, wrap_btn_text, false, mouse_over)
-	y_offset = y_offset + button_height + button_spacing
-	
-	-- Dock/Undock button
-	local dock_text = is_docked() and "Undock Window" or "Dock Window"
-	mouse_over = gfx.mouse_x >= margin and gfx.mouse_x <= margin + content_width
-		and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
-	draw_button(margin, y_offset, content_width, button_height, dock_text, false, mouse_over)
-	y_offset = y_offset + button_height + button_spacing
 
-	-- Toolbar position buttons
-	local tb_pos_w = (content_width - button_spacing) / 2
-	local tb_pos_labels = {"Toolbar: Top", "Toolbar: Bottom"}
+	local tb_btn_spacing = 10
+	local tb_pos_w = (content_width - tb_btn_spacing) / 2
+	local tb_pos_labels = {"Top", "Bottom"}
 	local tb_pos_values = {"top", "bottom"}
 	for i = 1, 2 do
-		local btn_x = margin + (i - 1) * (tb_pos_w + button_spacing)
+		local btn_x = margin + (i - 1) * (tb_pos_w + tb_btn_spacing)
 		local is_active = (toolbar_position == tb_pos_values[i])
-		mouse_over = gfx.mouse_x >= btn_x and gfx.mouse_x <= btn_x + tb_pos_w
+		local mouse_over = gfx.mouse_x >= btn_x and gfx.mouse_x <= btn_x + tb_pos_w
 			and gfx.mouse_y >= y_offset and gfx.mouse_y <= y_offset + button_height
 		draw_button(btn_x, y_offset, tb_pos_w, button_height, tb_pos_labels[i], is_active, mouse_over)
 	end
@@ -1712,52 +1701,8 @@ function handle_settings_mouse()
 	
 	y_offset = y_offset + button_height + section_spacing
 	
-	-- Skip display label
-	y_offset = y_offset + label_height
-	
-	-- Show/Hide completed button
-	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
-		if mouse_x >= margin and mouse_x <= margin + content_width
-			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
-			local preserved_selection = selected_id
-			save_state_for_undo("Toggle show completed")
-			show_completed = not show_completed
-			mark_cache_dirty()
-			if preserved_selection and todo_items[preserved_selection] then
-				if show_completed or not todo_items[preserved_selection].done then
-					selected_id = preserved_selection
-				end
-			end
-			save_settings_deferred()
-			request_immediate_update()
-		end
-	end
-	y_offset = y_offset + button_height + 10
-	
-	-- Text wrap button
-	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
-		if mouse_x >= margin and mouse_x <= margin + content_width
-			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
-			save_state_for_undo("Toggle text wrap")
-			wrap_task_text = not wrap_task_text
-			mark_cache_dirty()
-			save_settings_deferred()
-			request_immediate_update()
-		end
-	end
-	y_offset = y_offset + button_height + 10
-	
-	-- Dock/Undock button
-	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
-		if mouse_x >= margin and mouse_x <= margin + content_width
-			and mouse_y >= y_offset and mouse_y <= y_offset + button_height then
-			toggle_dock()
-			request_immediate_update()
-		end
-	end
-	y_offset = y_offset + button_height + 10
-
 	-- Toolbar position buttons
+	y_offset = y_offset + label_height -- skip "Toolbar Position:" label
 	local tb_pos_w = (content_width - 10) / 2
 	local tb_pos_values = {"top", "bottom"}
 	if mouse_cap & 1 == 1 and last_mouse_cap & 1 == 0 then
@@ -2003,10 +1948,10 @@ function get_hovered_toolbar_btn(mouse_x, mouse_y)
 		end
 	end
 
-	-- Center group: trash, collapse, eye
+	-- Center group: trash, collapse, eye, wrap
 	local group_gap      = tb_padding * 3
 	local left_group_end = tb_padding + 2 * (tb_btn_w + tb_padding)
-	local center_group_w = 3 * tb_btn_w + 2 * tb_padding
+	local center_group_w = 4 * tb_btn_w + 3 * tb_padding
 	local right_start    = gfx.w - tb_padding - tb_btn_w
 	local ideal_center   = math.floor((gfx.w - center_group_w) / 2 + 0.5)
 	local center_start   = math.max(ideal_center, left_group_end + group_gap)
@@ -2016,6 +1961,7 @@ function get_hovered_toolbar_btn(mouse_x, mouse_y)
 		{key = "trash",    label = "Clear All Tasks"},
 		{key = "collapse", label = has_any_uncollapsed() and "Collapse All" or "Expand All"},
 		{key = "eye",      label = show_completed and "Hide Completed" or "Show Completed"},
+		{key = "wrap",     label = wrap_task_text and "Disable Text Wrap" or "Enable Text Wrap"},
 	}
 	for i, btn in ipairs(center_btns) do
 		local bx = center_start + (i - 1) * (tb_btn_w + tb_padding)
@@ -2267,10 +2213,12 @@ function draw_gui()
 		{icon = "undo", disabled = #undo_stack == 0},
 		{icon = "redo", disabled = #redo_stack == 0},
 	}
+	local wrap_icon = wrap_task_text and "wrap_on" or "wrap_off"
 	local center_btns = {
 		{icon = "trash",       disabled = false},
 		{icon = collapse_icon, disabled = false},
 		{icon = eye_icon,      disabled = false},
+		{icon = wrap_icon,     disabled = false},
 	}
 	local right_btns = {
 		{icon = dock_icon, disabled = false},
@@ -2425,15 +2373,15 @@ function handle_mouse()
 				end
 			end
 
-			-- Center group: trash, collapse, eye
+			-- Center group: trash, collapse, eye, wrap
 			local group_gap      = tb_padding * 3
 			local left_group_end = tb_padding + 2 * (tb_btn_w + tb_padding)
-			local center_group_w = 3 * tb_btn_w + 2 * tb_padding
+			local center_group_w = 4 * tb_btn_w + 3 * tb_padding
 			local right_start_c  = gfx.w - tb_padding - tb_btn_w
 			local ideal_center   = math.floor((gfx.w - center_group_w) / 2 + 0.5)
 			local center_start   = math.max(ideal_center, left_group_end + group_gap)
 			center_start         = math.min(center_start, right_start_c - group_gap - center_group_w)
-			local center_actions = {"trash", "collapse", "eye"}
+			local center_actions = {"trash", "collapse", "eye", "wrap"}
 			for i, action in ipairs(center_actions) do
 				local bx = center_start + (i - 1) * (tb_btn_w + tb_padding)
 				if mouse_x >= bx and mouse_x <= bx + tb_btn_w
@@ -2449,6 +2397,11 @@ function handle_mouse()
 					elseif action == "eye" then
 						save_state_for_undo("Toggle show completed")
 						show_completed = not show_completed
+						mark_cache_dirty()
+						save_settings_deferred()
+					elseif action == "wrap" then
+						save_state_for_undo("Toggle text wrap")
+						wrap_task_text = not wrap_task_text
 						mark_cache_dirty()
 						save_settings_deferred()
 					end
@@ -2532,7 +2485,8 @@ function handle_mouse()
 				drag_item_id = mouse_down_item
 
 				-- Calculate drag offset using actual accumulated heights
-				local accumulated_y = 10 - scroll_offset
+				local task_area_top = toolbar_position == "top" and toolbar_height or 0
+				local accumulated_y = task_area_top + 10 - scroll_offset
 				for _, display_item in ipairs(display_list) do
 					if display_item.id == mouse_down_item then
 						break
