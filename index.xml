@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie" commit="43a2e3448472c91d7de209ddbff1702dcb04bb8c">
+<index version="1" name="CaptainCurrie" commit="08840bffa306607dffbbc6f884c8ade494d9ab0c">
   <category name="Development">
     <reapack name="reasets.lua" type="script" desc="reasets - REAper track-SETS manager">
       <metadata>
@@ -23,6 +23,9 @@
       <version name="1.4" author="captaincurrie" time="2026-03-23T04:19:10Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/43a2e3448472c91d7de209ddbff1702dcb04bb8c/Development/reasets.lua</source>
       </version>
+      <version name="1.5" author="captaincurrie" time="2026-04-12T21:55:28Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/08840bffa306607dffbbc6f884c8ade494d9ab0c/Development/reasets.lua</source>
+      </version>
     </reapack>
     <reapack name="reatask.lua" type="script" desc="reatask - reaper task manager">
       <metadata>
@@ -42,6 +45,9 @@
       </version>
       <version name="1.4" author="captaincurrie" time="2026-03-23T04:19:10Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/43a2e3448472c91d7de209ddbff1702dcb04bb8c/Development/reatask.lua</source>
+      </version>
+      <version name="1.5" author="captaincurrie" time="2026-04-12T21:55:28Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/08840bffa306607dffbbc6f884c8ade494d9ab0c/Development/reatask.lua</source>
       </version>
     </reapack>
   </category>
