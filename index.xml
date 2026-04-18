@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie" commit="f5a0da5e6b2fa737c28baceec84c207c2c018b72">
+<index version="1" name="CaptainCurrie" commit="d3c39f6a694b2ad433b8db7556294e0a94e01603">
   <category name="Development">
+    <reapack name="reamacros.lua" type="script" desc="reamacros - REAper MACROS">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 reamacros - REAper MACROS\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.1" author="captaincurrie" time="2026-04-18T17:10:26Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reamacros.lua</source>
+      </version>
+    </reapack>
     <reapack name="reasets.lua" type="script" desc="reasets - REAper track-SETS manager">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -29,6 +43,9 @@
       <version name="1.6" author="captaincurrie" time="2026-04-12T21:55:30Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/f5a0da5e6b2fa737c28baceec84c207c2c018b72/Development/reasets.lua</source>
       </version>
+      <version name="1.7" author="captaincurrie" time="2026-04-18T17:10:26Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reasets.lua</source>
+      </version>
     </reapack>
     <reapack name="reatask.lua" type="script" desc="reatask - reaper task manager">
       <metadata>
@@ -54,6 +71,9 @@
       </version>
       <version name="1.6" author="captaincurrie" time="2026-04-12T21:55:30Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/f5a0da5e6b2fa737c28baceec84c207c2c018b72/Development/reatask.lua</source>
+      </version>
+      <version name="1.7" author="captaincurrie" time="2026-04-18T17:10:26Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reatask.lua</source>
       </version>
     </reapack>
   </category>
