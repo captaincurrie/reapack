@@ -1,5 +1,5 @@
 -- @description reamacros - REAper MACROS
--- @version 1.6
+-- @version 1.7
 -- @author captaincurrie
 -- @license GNU General Public License
 -- @date 2026-03-13
