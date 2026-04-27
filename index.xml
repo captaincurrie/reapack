@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie" commit="05e6b874fae8490614c6babc91ef785d3a95bb88">
+<index version="1" name="CaptainCurrie" commit="8c1c67baa6ba7872146ff316569950f4ff1595ee">
   <category name="Development">
     <reapack name="reamacros.lua" type="script" desc="reamacros - REAper MACROS">
       <metadata>
@@ -28,6 +28,9 @@
       </version>
       <version name="1.6" author="captaincurrie" time="2026-04-27T01:33:15Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/05e6b874fae8490614c6babc91ef785d3a95bb88/Development/reamacros.lua</source>
+      </version>
+      <version name="1.7" author="captaincurrie" time="2026-04-27T01:40:14Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/8c1c67baa6ba7872146ff316569950f4ff1595ee/Development/reamacros.lua</source>
       </version>
     </reapack>
     <reapack name="reasets.lua" type="script" desc="reasets - REAper track-SETS manager">
