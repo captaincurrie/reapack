@@ -1,5 +1,5 @@
 -- @description reatask - reaper task manager
--- @version 1.4
+-- @version 1.5
 -- @author captaincurrie
 -- @license GPL v3
 -- @date 2025 12 28
