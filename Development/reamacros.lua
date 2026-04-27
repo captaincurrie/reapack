@@ -1,5 +1,5 @@
 -- @description reamacros - REAper MACROS
--- @version 1.2
+-- @version 1.3
 -- @author captaincurrie
 -- @license GNU General Public License
 -- @date 2026-03-13
@@ -244,19 +244,129 @@ end
 -- Constants
 --
 local SCRIPT_NAME = "reamacros"
-local SCRIPT_VERSION = 1
+local EXT_SECTION_VERSION = 1
+local DISPLAY_VERSION = "1.0"
 local DEFAULT_MACROS = 8
 local MAX_MACROS = 64
 local AUTOMATION_FX_NAME = "Reamacros_master"
-local EXT_SECTION = SCRIPT_NAME .. "_v" .. SCRIPT_VERSION
+local EXT_SECTION = SCRIPT_NAME .. "_v" .. EXT_SECTION_VERSION
 local EXT_KEY = "state"
-local VERSION = "1.0"
 local KNOB_SIZE = 72
 local KNOB_SPACING = 8 -- matches ImGui_StyleVar_ItemSpacing x value
 local KNOB_DRAG_SPEED = 0.004
 local SEP_THICKNESS = 2.0 -- section separator line thickness (px)
 local SEP_MARGIN = 8 -- spacing above and below each section separator (px)
 local SEP_COLOR = 0x505050FF
+
+-- Numeric/geometry/engine constants
+local CONST = {
+	-- Reaper FX encoding
+	FX_ADDR_ENCODED_BIT = 0x2000000,
+	-- Float epsilon for ~zero comparisons
+	EPSILON = 1e-6,
+	-- Curve editor geometry
+	HANDLE_R = 5.0,
+	CURVE_CANVAS_PAD = 12,
+	CURVE_CANVAS_HEIGHT = 180,
+	CURVE_SEGS = 64,
+	CURVE_LBL_COL_W = 54,
+	CURVE_LBL_GAP = 6,
+	CURVE_BTN_COL_W = 110,
+	-- Sparkline
+	SPARKLINE_W = 78,
+	SPARKLINE_SEGS = 20,
+	-- Knob drag/geometry handled elsewhere by KNOB_* constants
+	-- Poll throttle for automation FX slider readback (seconds)
+	POLL_INTERVAL = 1 / 15,
+}
+
+--
+-- Color palette
+--
+local COL = {
+	-- Panel / chrome
+	HEADER        = 0x1A1A2EFF,
+	PANEL         = 0x16213EFF,
+	TITLE_ACTIVE  = 0x0F3460FF,
+	ACCENT        = 0x3A8FFFFF,
+	SEL_BG        = 0x3A8FFF33,
+	WARN          = 0xFF6B6BFF,
+	TEXT_DIM      = 0x666666FF,
+	TEXT_DIMMER   = 0x555555FF,
+	TEXT_GREY     = 0x888888FF,
+	TEXT_LIGHT    = 0xAAAAAAAAFF,
+	TEXT_MID      = 0x999999FF,
+	-- Neutral buttons
+	BTN           = 0x0F3460FF,
+	BTN_HOV       = 0x1A5276FF,
+	BTN_ACT       = 0x2980B9FF,
+	-- Constructive (green)
+	GREEN_BTN     = 0x1A6B1AFF,
+	GREEN_HOV     = 0x248F24FF,
+	GREEN_ACT     = 0x2EAD2EFF,
+	-- Destructive (red)
+	RED_BTN       = 0x8B0000FF,
+	RED_HOV       = 0xAA0000FF,
+	RED_ACT       = 0xCC0000FF,
+	RED_DEEP      = 0x5A0000FF,
+	-- Warning / amber
+	AMBER_BTN     = 0x8B4500FF,
+	AMBER_HOV     = 0xAA5500FF,
+	AMBER_ACT     = 0xCC6600FF,
+	-- Guide / learn-off amber
+	GUIDE_BTN     = 0x8B5A00FF,
+	GUIDE_HOV     = 0xAA7000FF,
+	GUIDE_ACT     = 0xCC8500FF,
+	-- Mute (rose)
+	MUTE_BTN      = 0xB93F54FF,
+	MUTE_HOV      = 0xD44A63FF,
+	MUTE_ACT      = 0xE05570FF,
+	-- Inactive / disabled
+	INACTIVE_BG   = 0x3A3A3AFF,
+	INACTIVE_HOV  = 0x4A4A4AFF,
+	INACTIVE_ACT  = 0x3A3A3AFF,
+	DARK_BG       = 0x2A2A2AFF,
+	DARK_BG_HOV   = 0x3A3A3AFF,
+	DARK_BG_ACT   = 0x4A4A4AFF,
+	LEARN_OFF_HOV = 0x5A4A00FF,
+	LEARN_OFF_ACT = 0x7A6200FF,
+	-- Selected toggle
+	TOG_ON        = 0x285A28FF,
+	-- Canvas / curve editor
+	CANVAS_BG     = 0x0E1220FF,
+	CANVAS_BORDER = 0x505050FF,
+	GRID          = 0x22283AFF,
+	CURVE_LINE    = 0x3A8FFFFF,
+	TANGENT       = 0x55555588,
+	MACRO_CURSOR  = 0xFFAA0099,
+	HANDLE_RING   = 0xFFFFFFBB,
+	-- Sparkline
+	SPARK_BG      = 0x111E2EFF,
+	SPARK_BORDER  = 0x333333FF,
+	SPARK_HOV     = 0xFFAA00FF,
+	SPARK_CURSOR  = 0xFFFFFF66,
+	SPARK_OUTBAR  = 0x3A8FFFAA,
+	SPARK_OUTBG   = 0x1A1A2EFF,
+	SPARK_OUTBDR  = 0x444444FF,
+	-- Knob arc
+	KNOB_BG       = 0x2A2A2AFF,
+	KNOB_BORDER   = 0x666666FF,
+	KNOB_ARC_ON   = 0xFFAA0099,
+	KNOB_ARC_OFF  = 0x444444FF,
+	KNOB_POINTER  = 0xFFFFFFFF,
+	-- Semi-transparent accents
+	ACCENT_DIM    = 0x3A8FFF66,
+	WARN_DIM      = 0xFF6B6B55,
+	-- Track cell muted dim
+	DIM_MUTED     = 0x44444488,
+	-- White
+	WHITE         = 0xFFFFFFFF,
+	BLACK_A8      = 0x00000088,
+}
+
+-- Forward-declare ctx-dependent helpers that are used by functions
+-- defined before the main GUI helpers section.
+local tooltip
 
 -- Precomputed arc geometry for knob drawing (avoids trig every frame)
 local ARC_START_RAD = math.pi * 0.75
@@ -325,6 +435,7 @@ local eval_curve
 local default_curve
 local get_track_by_guid
 local set_status
+local find_parent_scope
 
 --
 -- Automation JSFX helpers
@@ -348,29 +459,6 @@ end
 -- FX Container helpers
 --
 
--- Find the Reamacros Links container on a track; return top-level FX index or -1
-local function find_container_on_track(tr)
-	local n = r.TrackFX_GetCount(tr)
-	for i = 0, n - 1 do
-		local _, name = r.TrackFX_GetFXName(tr, i, "")
-		if name:find(CONTAINER_NAME, 1, true) then
-			return i
-		end
-	end
-	return -1
-end
-
--- Find or create the Reamacros Links container on a track
-local function find_or_create_container(tr)
-	local idx = find_container_on_track(tr)
-	if idx >= 0 then return idx end
-	idx = r.TrackFX_AddByName(tr, "Container", false, -1)
-	if idx >= 0 then
-		r.TrackFX_SetNamedConfigParm(tr, idx, "renamed_name", CONTAINER_NAME)
-	end
-	return idx
-end
-
 -- Get number of items inside a container
 local function get_container_count(tr, container_fx)
 	local rv, cnt_str = r.TrackFX_GetNamedConfigParm(tr, container_fx, "container_count")
@@ -384,14 +472,246 @@ local function get_container_item_address(tr, container_fx, item_idx)
 	return nil
 end
 
--- Resolve a link's JSFX to its full encoded FX address (container-aware)
+-- Is the given FX address a container?
+local function is_container(tr, fx_addr)
+	local rv = r.TrackFX_GetNamedConfigParm(tr, fx_addr, "container_count")
+	return rv
+end
+
+-- Walk the entire FX tree on a track (top-level and nested containers),
+-- calling fn(addr) for every FX. Returns early with the first non-nil
+-- value returned by fn, or nil if fn never returns a value.
+local function walk_all_fx(tr, fn)
+	local function scan(parent_addr)
+		local n = parent_addr
+			and r.TrackFX_GetNamedConfigParm(tr, parent_addr, "container_count")
+			or r.TrackFX_GetCount(tr)
+		if parent_addr then n = tonumber(n) or 0 end
+		for i = 0, n - 1 do
+			local addr
+			if parent_addr then
+				local rv, s = r.TrackFX_GetNamedConfigParm(tr, parent_addr, "container_item." .. i)
+				addr = rv and tonumber(s) or nil
+			else
+				addr = i
+			end
+			if addr then
+				local rv2 = fn(addr)
+				if rv2 ~= nil then return rv2 end
+				if is_container(tr, addr) then
+					local rv3 = scan(addr)
+					if rv3 ~= nil then return rv3 end
+				end
+			end
+		end
+		return nil
+	end
+	return scan(nil)
+end
+
+-- Find the Reamacros Links container within a given scope.
+-- scope_addr = nil means top-level; otherwise an encoded container address.
+-- Returns the FX address of the links container, or -1 if not found.
+local function find_container_in_scope(tr, scope_addr)
+	if scope_addr == nil then
+		-- Top-level scan
+		local n = r.TrackFX_GetCount(tr)
+		for i = 0, n - 1 do
+			local _, name = r.TrackFX_GetFXName(tr, i, "")
+			if name:find(CONTAINER_NAME, 1, true) then
+				return i
+			end
+		end
+		return -1
+	end
+	-- Scoped scan: look inside scope_addr
+	local cnt = get_container_count(tr, scope_addr)
+	for i = 0, cnt - 1 do
+		local addr = get_container_item_address(tr, scope_addr, i)
+		if addr then
+			local _, name = r.TrackFX_GetFXName(tr, addr, "")
+			if name:find(CONTAINER_NAME, 1, true) then
+				return addr
+			end
+		end
+	end
+	return -1
+end
+
+-- Back-compat alias: find Reamacros Links container at top level
+local function find_container_on_track(tr)
+	return find_container_in_scope(tr, nil)
+end
+
+-- Build the ancestry chain of a container address: list of
+-- (parent_addr, pos_in_parent, item_count_of_parent) from root down to,
+-- but not including, scope_addr. Returns a list where index 1 is the
+-- outermost level (parent = nil = track root). Each entry:
+--   { parent = parent_addr_or_nil, pos = pos_of_child_in_parent, count = item_count_of_parent }
+-- The child at each level is the scope at the next level down; the final
+-- entry's child is scope_addr itself.
+local function build_ancestry(tr, scope_addr)
+	if scope_addr == nil then return {} end
+	local chain = {}
+	local cur = scope_addr
+	while cur ~= nil do
+		local p, pos = find_parent_scope(tr, cur)
+		local cnt = p and get_container_count(tr, p) or r.TrackFX_GetCount(tr)
+		table.insert(chain, 1, { parent = p, pos = pos, count = cnt })
+		cur = p
+	end
+	return chain
+end
+
+-- Compute the encoded FX address for inserting a new item at position
+-- `insert_pos` inside `scope_addr`. Walks the full ancestry so that
+-- arbitrary nesting depths are encoded correctly.
+--
+-- Reaper's encoded address formula for an FX at depth d is:
+--   0x2000000 + sum_{k=0..d} (1 + p_k) * prod_{j=0..k-1} (1 + N_j)
+-- where p_k is the position at level k and N_j is the item count at level j.
+local function compute_nested_insert_addr(tr, scope_addr, insert_pos)
+	local chain = build_ancestry(tr, scope_addr)
+	-- Append the new child as the final level.
+	local scope_count = get_container_count(tr, scope_addr)
+	table.insert(chain, { parent = scope_addr, pos = insert_pos, count = scope_count })
+
+	-- chain[1] is top level: parent = nil, count = track top-level FX count,
+	-- pos = position of chain[2]'s parent (i.e. scope root) at top level.
+	-- But we need the counts at each *ancestor* level, walking down.
+	-- The formula needs N_0 = top-level count, N_1 = count of first container
+	-- down the chain, ..., N_{d-1} = count of scope_addr.
+	-- chain[k].count is the item count of chain[k].parent (the level above
+	-- chain[k].pos), which equals N_{k-1} in 0-based indexing.
+	--
+	-- Position at level k (0-based) is chain[k+1].pos (1-based lua).
+	-- Count N_j (0-based) is chain[j+1].count (1-based lua).
+
+	local addr = 0x2000000
+	local mult = 1
+	for k = 1, #chain do
+		addr = addr + (1 + chain[k].pos) * mult
+		mult = mult * (1 + chain[k].count)
+	end
+	return addr
+end
+
+-- Find or create a Reamacros Links container within the given scope.
+-- scope_addr = nil means top-level; otherwise an encoded container address
+-- of the parent container that should hold the Reamacros Links container.
+-- Returns the FX address of the links container, or -1 on failure.
+local function find_or_create_container_in_scope(tr, scope_addr)
+	local existing = find_container_in_scope(tr, scope_addr)
+	if existing >= 0 then return existing end
+
+	if scope_addr == nil then
+		-- Top-level insert
+		local idx = r.TrackFX_AddByName(tr, "Container", false, -1)
+		if idx >= 0 then
+			r.TrackFX_SetNamedConfigParm(tr, idx, "renamed_name", CONTAINER_NAME)
+		end
+		return idx
+	end
+
+	-- Nested insert: append as last item inside scope_addr.
+	local scope_count = get_container_count(tr, scope_addr)
+	local insert_addr = compute_nested_insert_addr(tr, scope_addr, scope_count)
+	local new_fx = r.TrackFX_AddByName(tr, "Container", false, -1000 - insert_addr)
+	if new_fx < 0 then return -1 end
+	-- Resolve the actual address of the newly-inserted container
+	local new_count = get_container_count(tr, scope_addr)
+	local new_addr = get_container_item_address(tr, scope_addr, new_count - 1)
+	if not new_addr then return -1 end
+	r.TrackFX_SetNamedConfigParm(tr, new_addr, "renamed_name", CONTAINER_NAME)
+	return new_addr
+end
+
+-- Back-compat: find-or-create at top level
+local function find_or_create_container(tr)
+	return find_or_create_container_in_scope(tr, nil)
+end
+
+-- Determine the parent scope of a target FX address.
+-- Returns: parent_scope_addr (nil if target is top-level, else encoded
+-- container address of its parent), and pos_in_parent (item index).
+-- Walks top-level FX, descending into containers, searching for target_addr.
+find_parent_scope = function(tr, target_addr)
+	-- Fast path: if address isn't encoded, it's top-level
+	if (target_addr & CONST.FX_ADDR_ENCODED_BIT) == 0 then
+		return nil, target_addr
+	end
+	-- Scan top-level; for each container, scan items for a GUID match
+	local target_guid = r.TrackFX_GetFXGUID(tr, target_addr)
+	if not target_guid or target_guid == "" then return nil, -1 end
+
+	-- Custom recursive scan (we need parent+pos, not just addr).
+	local function scan(parent_addr)
+		local n = parent_addr
+			and get_container_count(tr, parent_addr)
+			or r.TrackFX_GetCount(tr)
+		for i = 0, n - 1 do
+			local addr = parent_addr
+				and get_container_item_address(tr, parent_addr, i)
+				or i
+			if addr then
+				local g = r.TrackFX_GetFXGUID(tr, addr)
+				if g == target_guid then
+					return parent_addr, i
+				end
+				if is_container(tr, addr) then
+					local ps, pp = scan(addr)
+					if pp >= 0 then return ps, pp end
+				end
+			end
+		end
+		return nil, -1
+	end
+	return scan(nil)
+end
+
+-- Resolve a link's JSFX to its full encoded FX address.
+-- Flat design: lk.link_fx_idx is already the encoded FX address when
+-- container_fx_idx is nil. Legacy container design: resolve via container.
+--
+-- If the stored address is stale (FX moved, track rearranged), re-resolve
+-- by GUID and update the stored address.
 local function get_link_fx_address(tr, lk)
 	if not tr or lk.link_fx_idx == nil then return nil end
+
+	-- Legacy container-based placement
 	if lk.container_fx_idx ~= nil then
-		return get_container_item_address(tr, lk.container_fx_idx, lk.link_fx_idx)
+		local addr = get_container_item_address(tr, lk.container_fx_idx, lk.link_fx_idx)
+		if addr then
+			-- Verify GUID match; fall through to re-resolve if stale.
+			if lk.link_fx_guid and lk.link_fx_guid ~= "" then
+				local g = r.TrackFX_GetFXGUID(tr, addr)
+				if g == lk.link_fx_guid then return addr end
+			else
+				return addr
+			end
+		end
+	else
+		-- Flat sibling placement: link_fx_idx is the encoded FX address.
+		-- Verify GUID match; if stale, re-resolve below.
+		if lk.link_fx_guid and lk.link_fx_guid ~= "" then
+			local g = r.TrackFX_GetFXGUID(tr, lk.link_fx_idx)
+			if g == lk.link_fx_guid then return lk.link_fx_idx end
+		else
+			return lk.link_fx_idx
+		end
 	end
-	-- Legacy fallback: direct top-level FX index (pre-container migration)
-	return lk.link_fx_idx
+
+	-- Stale address: re-resolve by scanning the track for the GUID.
+	if not lk.link_fx_guid or lk.link_fx_guid == "" then return nil end
+	local found = walk_all_fx(tr, function(addr)
+		local g = r.TrackFX_GetFXGUID(tr, addr)
+		if g == lk.link_fx_guid then return addr end
+	end)
+	if found then
+		lk.link_fx_idx = found
+		lk.container_fx_idx = nil
+	end
+	return found
 end
 
 local function ensure_jsfx_file()
@@ -553,122 +873,159 @@ local function sync_link_jsfx_params(tr, fx_addr, macro_slot, crv, scale, offset
 	r.TrackFX_SetParam(tr, fx_addr, 9, crv.x1 or 1.0)   -- slider10: x1 (input threshold high)
 end
 
--- Install a link JSFX inside the "Reamacros Links" container on the target
--- track, map its output (slider8) to a container parameter, and wire
--- parameter modulation from the container parameter  target FX parameter.
--- Returns the item index inside the container, or -1 on failure.
+-- Install a link JSFX as a sibling of the target FX in the same container
+-- scope, and wire parameter modulation. The link JSFX lives at the end of
+-- the target's parent scope so slaves cluster predictably at the tail of
+-- the FX chain, away from the active audio path.
+--
+-- No "Reamacros Links" container is used; flat siblings only. Plink works
+-- because both FX live in the same scope.
+--
+-- Returns the encoded FX address of the installed link JSFX, or -1 on
+-- failure.
 local function install_link_jsfx(tr, lk, macro_idx)
 	if not tr then return -1 end
 
-	-- Find or create the per-track container
-	local container_fx = find_or_create_container(tr)
-	if container_fx < 0 then
-		set_status("Container create failed")
+	-- 1. Resolve the target FX address and its parent scope.
+	local target_fx = resolve_fx_index(tr, lk)
+	if target_fx < 0 then
+		set_status("Link install: target FX not found")
 		return -1
 	end
+	local scope_addr, _target_pos = find_parent_scope(tr, target_fx)
+	-- scope_addr: nil = top-level; otherwise the parent container's address
 
-	-- Reaper container addressing (see reaper.h / ReaScript docs):
-	--   encoded_addr = 0x2000000 + (1 + container_idx)
-	--                            + (1 + pos_in_container) * (1 + top_level_fx_count)
-	-- top_level_fx_count is the FX count at the enclosing level (includes the
-	-- container itself). To INSERT at that address via TrackFX_AddByName,
-	-- pass instantiate = -1 - encoded_addr (== -(encoded_addr + 1)).
-	local tc = r.TrackFX_GetCount(tr)
-	local cnt = get_container_count(tr, container_fx)
-	local pos = cnt -- insert at end of container
-	local insert_addr = 0x2000000 + (1 + container_fx) + (1 + pos) * (1 + tc)
-
-	-- TrackFX_AddByName sentinel: -1000 - encoded_addr for positional insert
-	local new_fx = r.TrackFX_AddByName(tr, LINK_FX_NAME, false, -1000 - insert_addr)
-	if new_fx < 0 then
-		set_status(("Link insert failed (addr=0x%X, tc=%d, cnt=%d)"):format(insert_addr, tc, cnt))
-		return -1
-	end
-
-	-- Determine the item position of the newly added FX (should be at end)
-	local new_cnt = get_container_count(tr, container_fx)
-	local item_idx = new_cnt - 1
-	if item_idx < 0 then
-		set_status("Link insert: container_count did not increase")
-		return -1
-	end
-
-	lk.container_fx_idx = container_fx
-	lk.link_fx_idx = item_idx
-
-	-- Get the encoded address and store the GUID for future resolution
-	local fx_addr = get_container_item_address(tr, container_fx, item_idx)
-	if not fx_addr then return -1 end
-	lk.link_fx_guid = r.TrackFX_GetFXGUID(tr, fx_addr) or ""
-
-	-- Set link JSFX parameters (curve, scale, offset, macro slot)
-	local crv = lk.curve or default_curve(0.0, 1.0)
-	sync_link_jsfx_params(tr, fx_addr, macro_idx - 1, crv, lk.scale, lk.offset)
-
-	-- Respect pre-existing mute state (e.g., loaded from project)
-	if lk.muted then
-		local mac = macros[macro_idx]
-		if mac then
-			local frozen = eval_curve(crv, mac.value) * (lk.scale or 1.0) + (lk.offset or 0.0)
-			r.TrackFX_SetParam(tr, fx_addr, 5, 0.0)
-			r.TrackFX_SetParam(tr, fx_addr, 6, math_max(-1, math_min(1, frozen)))
+	-- 2. Insert link JSFX as the last sibling of the target in its parent
+	--    scope (so slaves cluster at the end of the chain).
+	--
+	-- Reaper's encoded FX address for an item at position pos inside a
+	-- container at encoded address scope_addr is:
+	--   0x2000000 + (1 + scope_item_idx_in_parent) + (1 + pos) * (1 + parent_item_count)
+	-- where scope_item_idx_in_parent and parent_item_count refer to the
+	-- *immediate parent* of scope_addr, not the track top-level.
+	-- For a top-level container, the parent is the track FX chain so
+	-- parent_item_count = TrackFX_GetCount(tr).
+	-- For a nested container, the parent is another container; we need
+	-- its item count and the position of scope_addr within it.
+	--
+	-- Strategy: instead of computing the encoded address ourselves (which
+	-- requires knowing the full ancestry), we insert at top-level first
+	-- (TrackFX_AddByName returns the top-level index), then use
+	-- TrackFX_CopyToTrack / the move API if needed. BUT Reaper actually
+	-- DOES support inserting directly into a nested container via the
+	-- -1000 - encoded_addr idiom as long as we compute the address
+	-- correctly relative to the container's immediate parent.
+	--
+	-- Simpler approach: use get_container_item_address to walk the
+	-- ancestry of scope_addr, building the encoded insert address
+	-- bottom-up from the known Reaper formula.
+	local new_fx_addr
+	if scope_addr == nil then
+		-- Top-level insert: simple append at end of track FX chain
+		local new_idx = r.TrackFX_AddByName(tr, LINK_FX_NAME, false, -1)
+		if new_idx < 0 then
+			set_status("Link insert failed (top-level)")
+			return -1
+		end
+		new_fx_addr = new_idx
+	else
+		-- Scoped insert: append at end of scope_addr. Compute the encoded
+		-- insert address by walking the full ancestry so that arbitrary
+		-- nesting depths work correctly.
+		local cnt = get_container_count(tr, scope_addr)
+		local insert_addr = compute_nested_insert_addr(tr, scope_addr, cnt)
+		local ok_add = r.TrackFX_AddByName(tr, LINK_FX_NAME, false, -1000 - insert_addr)
+		if ok_add < 0 then
+			set_status("Link insert failed (scoped, depth>1)")
+			return -1
+		end
+		local new_cnt = get_container_count(tr, scope_addr)
+		new_fx_addr = get_container_item_address(tr, scope_addr, new_cnt - 1)
+		if not new_fx_addr then
+			set_status("Link insert: could not resolve new FX address")
+			return -1
 		end
 	end
 
-	-- Map link JSFX slider8 (param 7) to a container parameter
-	local rv, cp_str = r.TrackFX_GetNamedConfigParm(
-		tr, container_fx,
-		"container_map.add." .. item_idx .. ".7"
-	)
-	if rv then
-		lk.container_param = tonumber(cp_str)
+	-- 3. Rename the slave instance to include macro + param names for
+	--    self-identification in the FX chain.
+	local mac = macros[macro_idx]
+	local mac_name = (mac and mac.name) or ("Macro " .. macro_idx)
+	local pname = lk.param_name ~= "" and lk.param_name or "?"
+	local rename = ("%s [%s  %s]"):format(LINK_FX_NAME, mac_name, pname)
+	r.TrackFX_SetNamedConfigParm(tr, new_fx_addr, "renamed_name", rename)
+
+	-- 4. Set link JSFX parameters BEFORE wiring plink.
+	local crv = lk.curve or default_curve(0.0, 1.0)
+	sync_link_jsfx_params(tr, new_fx_addr, macro_idx - 1, crv, lk.scale, lk.offset)
+	if lk.muted and mac then
+		local frozen = eval_curve(crv, mac.value) * (lk.scale or 1.0) + (lk.offset or 0.0)
+		r.TrackFX_SetParam(tr, new_fx_addr, 5, 0.0)
+		r.TrackFX_SetParam(tr, new_fx_addr, 6, math_max(-1, math_min(1, frozen)))
 	end
 
-	-- Wire parameter modulation: target FX param → container parameter
-	-- The container parameter mirrors slider8 of the link JSFX inside it.
-	local target_fx = resolve_fx_index(tr, lk)
-	if target_fx >= 0 and lk.container_param ~= nil then
-		local parm_prefix = ("param.%d.plink."):format(lk.param)
-		r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "active",  "1")
-		r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "effect",  tostring(container_fx))
-		r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "param",   tostring(lk.container_param))
-		r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "scale",   "1")
-		r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "offset",  "0")
+	-- 5. Re-resolve target (its address may have shifted after the insert).
+	target_fx = resolve_fx_index(tr, lk)
+	if target_fx < 0 then
+		r.TrackFX_Delete(tr, new_fx_addr)
+		set_status("Link install: target lost after insert")
+		return -1
 	end
 
-	return item_idx
+	-- 6. Wire plink. Both FX live in the same scope so plink.effect is the
+	--    link JSFX's sibling index within that scope.
+	local effect_val
+	if scope_addr == nil then
+		effect_val = new_fx_addr -- top-level index
+	else
+		effect_val = get_container_count(tr, scope_addr) - 1 -- just appended
+	end
+	local parm_prefix = ("param.%d.plink."):format(lk.param)
+	r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "active", "1")
+	r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "effect", tostring(effect_val))
+	r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "param", "7")
+	r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "scale", "1")
+	r.TrackFX_SetNamedConfigParm(tr, target_fx, parm_prefix .. "offset", "0")
+
+	-- 7. Record state. No Reamacros Links container; store the encoded FX
+	--    address directly (container_fx_idx = nil means "raw FX address").
+	lk.container_fx_idx = nil
+	lk.link_fx_idx = new_fx_addr
+	lk.link_fx_guid = r.TrackFX_GetFXGUID(tr, new_fx_addr) or ""
+	lk.container_param = nil
+
+	return new_fx_addr
 end
 
--- Remove the link JSFX installed for a given link, clean up the container
--- parameter mapping, and clear parameter modulation wiring on the target.
+
+-- Remove the link JSFX installed for a given link and clear parameter
+-- modulation on the target. Link JSFX is stored as a flat sibling of the
+-- target (container_fx_idx == nil, link_fx_idx is the encoded FX address).
+-- Also handles legacy container-based placements for backward compat.
 local function remove_link_jsfx(tr, lk)
 	if not tr then return end
 
-	-- Clear parameter modulation on target FX first
+	-- 1. Clear parameter modulation on target FX
 	local target_fx = resolve_fx_index(tr, lk)
 	if target_fx >= 0 then
 		r.TrackFX_SetNamedConfigParm(tr, target_fx, ("param.%d.plink.active"):format(lk.param), "0")
 	end
 
+	-- 2. Delete the link JSFX.
 	local container_fx = lk.container_fx_idx
 	if container_fx ~= nil and lk.link_fx_idx ~= nil then
-		-- Delete container parameter mapping
+		-- Legacy: link JSFX was inside a Reamacros Links container.
 		if lk.container_param ~= nil then
 			r.TrackFX_GetNamedConfigParm(tr, container_fx, "container_map.delete." .. lk.container_param)
 		end
-
-		-- Delete the link JSFX from inside the container
 		local fx_addr = get_container_item_address(tr, container_fx, lk.link_fx_idx)
 		if fx_addr then
 			r.TrackFX_Delete(tr, fx_addr)
 		end
-
-		-- If container is now empty, delete the container itself
+		-- If the legacy Reamacros Links container is now empty, delete it.
 		local cnt = get_container_count(tr, container_fx)
 		if cnt == 0 then
 			r.TrackFX_Delete(tr, container_fx)
-			-- Invalidate container_fx_idx on all other links pointing to this track
-			-- (container is gone; they'll be re-resolved if needed)
 			local tguid = lk.track_guid
 			for _, mac in ipairs(macros) do
 				for _, other in ipairs(mac.links) do
@@ -679,7 +1036,6 @@ local function remove_link_jsfx(tr, lk)
 				end
 			end
 		else
-			-- Items after the deleted one shifted; re-resolve all links on this track
 			local tguid = lk.track_guid
 			local deleted_idx = lk.link_fx_idx
 			for _, mac in ipairs(macros) do
@@ -693,7 +1049,8 @@ local function remove_link_jsfx(tr, lk)
 			end
 		end
 	elseif lk.link_fx_idx ~= nil then
-		-- Legacy: direct top-level FX (pre-container migration)
+		-- Flat sibling placement (current design): link_fx_idx is the raw
+		-- encoded FX address. TrackFX_Delete accepts encoded addresses.
 		r.TrackFX_Delete(tr, lk.link_fx_idx)
 	end
 
@@ -703,90 +1060,46 @@ local function remove_link_jsfx(tr, lk)
 	lk.link_fx_guid = nil
 end
 
--- After load, re-resolve link JSFX positions for each link by scanning
--- inside the per-track "Reamacros Links" container. Falls back to scanning
--- top-level FX for legacy (pre-container) links.
+-- After load, re-resolve link JSFX addresses. Flat design: link JSFX is a
+-- sibling of the target FX (top-level or inside a user container). Find
+-- it by walking the whole track FX tree and matching on GUID, or by
+-- matching LINK_FX_NAME + macro slot.
 local function resolve_all_link_jsfx()
 	for mi, mac in ipairs(macros) do
 		for _, lk in ipairs(mac.links) do
 			local tr = get_track_by_guid(lk.track_guid)
 			if not tr then goto next_link end
 
-			-- Try to find the container on this track
-			local container_fx = find_container_on_track(tr)
-			if container_fx >= 0 then
-				lk.container_fx_idx = container_fx
-				local cnt = get_container_count(tr, container_fx)
-				local found = false
+			local found_addr = nil
 
-				-- First pass: match by GUID (most reliable)
-				if lk.link_fx_guid and lk.link_fx_guid ~= "" then
-					for ci = 0, cnt - 1 do
-						local addr = get_container_item_address(tr, container_fx, ci)
-						if addr then
-							local guid = r.TrackFX_GetFXGUID(tr, addr)
-							if guid and guid == lk.link_fx_guid then
-								lk.link_fx_idx = ci
-								found = true
-								break
-							end
-						end
-					end
-				end
+			-- First pass: match by GUID
+			if lk.link_fx_guid and lk.link_fx_guid ~= "" then
+				found_addr = walk_all_fx(tr, function(addr)
+					local g = r.TrackFX_GetFXGUID(tr, addr)
+					if g == lk.link_fx_guid then return addr end
+				end)
+			end
 
-				-- Second pass: match by macro slot + param values
-				if not found then
-					for ci = 0, cnt - 1 do
-						local addr = get_container_item_address(tr, container_fx, ci)
-						if addr then
-							local _, name = r.TrackFX_GetFXName(tr, addr, "")
-							if name:find(LINK_FX_NAME, 1, true) then
-								local slot = r.TrackFX_GetParam(tr, addr, 0)
-								if math_floor(slot + 0.5) == (mi - 1) then
-									lk.link_fx_idx = ci
-									lk.link_fx_guid = r.TrackFX_GetFXGUID(tr, addr) or ""
-									found = true
-									break
-								end
-							end
+			-- Second pass: match by LINK_FX_NAME + macro slot (slider1)
+			if not found_addr then
+				found_addr = walk_all_fx(tr, function(addr)
+					local _, name = r.TrackFX_GetFXName(tr, addr, "")
+					if name and name:find(LINK_FX_NAME, 1, true) then
+						local slot = r.TrackFX_GetParam(tr, addr, 0)
+						if math_floor(slot + 0.5) == (mi - 1) then
+							return addr
 						end
 					end
+				end)
+				if found_addr then
+					lk.link_fx_guid = r.TrackFX_GetFXGUID(tr, found_addr) or ""
 				end
+			end
 
-				-- Resolve container_param by scanning container mappings
-				if found and lk.container_param == nil and lk.link_fx_idx ~= nil then
-					-- Walk existing mappings to find one pointing to our item's param 7
-					-- (container_map.get.N returns "fx_idx\tparam_idx")
-					local pi = 0
-					while pi < 256 do
-						local rv, info = r.TrackFX_GetNamedConfigParm(
-							tr, container_fx, "container_map.get." .. pi)
-						if not rv then break end
-						-- info is "internal_fx_idx\tparam_idx" (tab-separated)
-						local mfx, mpar = info:match("^(%d+)\t(%d+)$")
-						if mfx and tonumber(mfx) == lk.link_fx_idx and tonumber(mpar) == 7 then
-							lk.container_param = pi
-							break
-						end
-						pi = pi + 1
-					end
-				end
-			else
-				-- No container; scan top-level FX for legacy link JSFX
-				if not lk.link_fx_idx then
-					local n = r.TrackFX_GetCount(tr)
-					for i = 0, n - 1 do
-						local _, name = r.TrackFX_GetFXName(tr, i, "")
-						if name:find(LINK_FX_NAME, 1, true) then
-							local slot = r.TrackFX_GetParam(tr, i, 0)
-							if math_floor(slot + 0.5) == (mi - 1) then
-								lk.link_fx_idx = i
-								lk.container_fx_idx = nil
-								break
-							end
-						end
-					end
-				end
+			if found_addr then
+				lk.link_fx_idx = found_addr
+				lk.container_fx_idx = nil
+				lk.container_param = nil
 			end
 
 			::next_link::
@@ -794,10 +1107,17 @@ local function resolve_all_link_jsfx()
 	end
 end
 
+local last_poll_time = 0
 local function poll_automation_fx()
 	if automation_fx_idx < 0 or not automation_track then
 		return
 	end
+	-- Throttle: polling faster than ~15Hz is wasted for GUI display.
+	local now = r.time_precise()
+	if (now - last_poll_time) < CONST.POLL_INTERVAL then
+		return
+	end
+	last_poll_time = now
 	-- Guard against track having been deleted
 	if not r.ValidatePtr(automation_track, "MediaTrack*") then
 		automation_track = nil
@@ -831,7 +1151,7 @@ local function serialize()
 		w(("m%d.val=%.6f"):format(i, m.value))
 		w(("m%d.lc=%d"):format(i, #m.links))
 		for j, lk in ipairs(m.links) do
-			local crv = lk.curve or default_curve(lk.min or 0.0, lk.max or 1.0)
+			local crv = lk.curve or default_curve(0.0, 1.0)
 			w(("m%d.l%d.guid=%s"):format(i, j, lk.track_guid))
 			w(("m%d.l%d.fxguid=%s"):format(i, j, lk.fx_guid or ""))
 			w(("m%d.l%d.fx=%d"):format(i, j, lk.fx))
@@ -1039,8 +1359,13 @@ local function ensure_link_curves()
 	for _, mac in ipairs(macros) do
 		for _, lk in ipairs(mac.links) do
 			if not lk.curve then
-				lk.curve = default_curve(lk.min or 0.0, lk.max or 1.0)
+				lk.curve = default_curve(0.0, 1.0)
 			end
+			-- Scrub legacy fields that are no longer used anywhere.
+			lk.min = nil
+			lk.max = nil
+			lk.out_min = nil
+			lk.out_max = nil
 		end
 	end
 end
@@ -1050,8 +1375,13 @@ local function backfill_fx_guids()
 		for _, lk in ipairs(mac.links) do
 			if not lk.fx_guid or lk.fx_guid == "" then
 				local tr = get_track_by_guid(lk.track_guid)
-				if tr and lk.fx >= 0 and lk.fx < r.TrackFX_GetCount(tr) then
-					lk.fx_guid = r.TrackFX_GetFXGUID(tr, lk.fx) or ""
+				-- lk.fx may be a container-encoded address (0x2000000 bit set);
+				-- TrackFX_GetFXGUID accepts encoded addresses directly.
+				if tr and lk.fx >= 0 then
+					local guid = r.TrackFX_GetFXGUID(tr, lk.fx)
+					if guid and guid ~= "" then
+						lk.fx_guid = guid
+					end
 				end
 			end
 		end
@@ -1063,21 +1393,23 @@ resolve_fx_index = function(tr, lk)
 		-- Legacy link without GUID; trust stored index
 		return lk.fx
 	end
-	-- Fast path: check stored index first
-	if lk.fx >= 0 and lk.fx < r.TrackFX_GetCount(tr) then
+	-- Fast path: check stored index first (may be a container-encoded address
+	-- with the 0x2000000 bit set). TrackFX_GetFXGUID accepts encoded addresses.
+	if lk.fx >= 0 then
 		local guid = r.TrackFX_GetFXGUID(tr, lk.fx)
 		if guid and guid == lk.fx_guid then
 			return lk.fx
 		end
 	end
-	-- Scan all FX for matching GUID (FX may have moved index)
-	local n = r.TrackFX_GetCount(tr)
-	for i = 0, n - 1 do
-		local guid = r.TrackFX_GetFXGUID(tr, i)
-		if guid and guid == lk.fx_guid then
-			lk.fx = i -- update stored index
-			return i
-		end
+	-- Recursive scan: walk top-level FX and descend into any containers
+	-- looking for a matching GUID. The FX may have moved or been nested.
+	local found = walk_all_fx(tr, function(addr)
+		local guid = r.TrackFX_GetFXGUID(tr, addr)
+		if guid and guid == lk.fx_guid then return addr end
+	end)
+	if found then
+		lk.fx = found -- update stored index (may be encoded)
+		return found
 	end
 	return -1 -- orphaned
 end
@@ -1144,8 +1476,8 @@ local function draw_knob(id, value, size)
 	local R = size * 0.5 - 4
 
 	-- Background
-	r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, R, 0x2A2A2AFF, 40)
-	r.ImGui_DrawList_AddCircle(dl, cx, cy, R, 0x666666FF, 40, 1.5)
+	r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, R, COL.KNOB_BG, 40)
+	r.ImGui_DrawList_AddCircle(dl, cx, cy, R, COL.KNOB_BORDER, 40, 1.5)
 
 	-- Arc (270 sweep, starting bottom-left) — uses precomputed unit vectors
 	local filled = math_floor(value * ARC_SEG + 0.5)
@@ -1154,7 +1486,7 @@ local function draw_knob(id, value, size)
 	for s = 0, ARC_SEG - 1 do
 		local u1 = ARC_UNIT[s]
 		local u2 = ARC_UNIT[s + 1]
-		local col = (s < filled) and 0xFFAA0099 or 0x444444FF
+		local col = (s < filled) and COL.KNOB_ARC_ON or COL.KNOB_ARC_OFF
 		r.ImGui_DrawList_AddLine(
 			dl,
 			cx + arc_r * u1.c,
@@ -1170,8 +1502,8 @@ local function draw_knob(id, value, size)
 	local pa = ARC_START_RAD + value * ARC_SWEEP_RAD
 	local px = cx + (R - 8) * math_cos(pa)
 	local py = cy + (R - 8) * math_sin(pa)
-	r.ImGui_DrawList_AddLine(dl, cx, cy, px, py, 0xFFFFFFFF, 2.0)
-	r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 4, 0xFFFFFFFF, 8)
+	r.ImGui_DrawList_AddLine(dl, cx, cy, px, py, COL.KNOB_POINTER, 2.0)
+	r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 4, COL.KNOB_POINTER, 8)
 
 	-- Invisible hit area
 	r.ImGui_SetCursorScreenPos(ctx, sx, sy)
@@ -1204,11 +1536,7 @@ local function draw_knob(id, value, size)
 	end
 
 	-- Tooltip
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, ("%.3f"):format(new_val))
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip(("%.3f"):format(new_val))
 
 	-- Advance cursor past knob
 	r.ImGui_SetCursorScreenPos(ctx, sx, sy + size)
@@ -1217,24 +1545,70 @@ local function draw_knob(id, value, size)
 end
 
 --
--- GUI
+-- GUI helpers
 --
-local COL_HEADER = 0x1A1A2EFF
-local COL_PANEL = 0x16213EFF
-local COL_ACCENT = 0x3A8FFFFF
-local COL_SEL_BG = 0x3A8FFF33
-local COL_BTN = 0x0F3460FF
-local COL_BTN_HOV = 0x1A5276FF
-local COL_BTN_ACT = 0x2980B9FF
-local COL_WARN = 0xFF6B6BFF
+-- Back-compat aliases for palette entries used pervasively.
+local COL_HEADER = COL.HEADER
+local COL_PANEL  = COL.PANEL
+local COL_ACCENT = COL.ACCENT
+local COL_SEL_BG = COL.SEL_BG
+local COL_BTN    = COL.BTN
+local COL_BTN_HOV = COL.BTN_HOV
+local COL_BTN_ACT = COL.BTN_ACT
+local COL_WARN   = COL.WARN
 
 local function push_btn_style()
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL_BTN)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL_BTN_HOV)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL_BTN_ACT)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.BTN_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.BTN_ACT)
 end
 local function pop_btn_style()
 	r.ImGui_PopStyleColor(ctx, 3)
+end
+
+-- Constructive (green) button style. Call pop_btn_style() + pop 3 extra to unwind.
+local function push_constructive_btn_style()
+	push_btn_style()
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GREEN_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GREEN_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GREEN_ACT)
+end
+local function pop_constructive_btn_style()
+	r.ImGui_PopStyleColor(ctx, 3)
+	pop_btn_style()
+end
+
+-- Destructive (red) button style.
+local function push_destructive_btn_style()
+	push_btn_style()
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.RED_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.RED_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.RED_ACT)
+end
+local function pop_destructive_btn_style()
+	r.ImGui_PopStyleColor(ctx, 3)
+	pop_btn_style()
+end
+
+-- Warning (amber) button style.
+local function push_warning_btn_style()
+	push_btn_style()
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.AMBER_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.AMBER_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.AMBER_ACT)
+end
+local function pop_warning_btn_style()
+	r.ImGui_PopStyleColor(ctx, 3)
+	pop_btn_style()
+end
+
+-- Show a tooltip if the previous item is hovered.
+tooltip = function(text)
+	if r.ImGui_IsItemHovered(ctx) then
+		r.ImGui_BeginTooltip(ctx)
+		r.ImGui_Text(ctx, text)
+		r.ImGui_EndTooltip(ctx)
+	end
 end
 
 local function section_separator()
@@ -1396,20 +1770,12 @@ local function draw_knob_bank()
 			if r.ImGui_MenuItem(ctx, "Show Envelope") then
 				show_macro_envelope(i)
 			end
-			if r.ImGui_IsItemHovered(ctx) then
-				r.ImGui_BeginTooltip(ctx)
-				r.ImGui_Text(ctx, "Create/show the automation envelope\nfor this macro in the arrange view")
-				r.ImGui_EndTooltip(ctx)
-			end
+			tooltip("Create/show the automation envelope\nfor this macro in the arrange view")
 
 			if r.ImGui_MenuItem(ctx, "Show Envelope Exclusive") then
 				show_macro_envelope_exclusive(i)
 			end
-			if r.ImGui_IsItemHovered(ctx) then
-				r.ImGui_BeginTooltip(ctx)
-				r.ImGui_Text(ctx, "Show only this macro's envelope;\nhides all other visible macro envelopes")
-				r.ImGui_EndTooltip(ctx)
-			end
+			tooltip("Show only this macro's envelope;\nhides all other visible macro envelopes")
 
 			r.ImGui_Separator(ctx)
 
@@ -1491,7 +1857,7 @@ local function draw_knob_bank()
 
 		-- Link count
 		local lk_str = #mac.links .. " lnk"
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x666666FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIM)
 		center_text(lk_str, KNOB_SIZE)
 		r.ImGui_PopStyleColor(ctx)
 
@@ -1545,13 +1911,13 @@ eval_curve = function(crv, x)
 	if x <= x0 then return y0 end
 	if x >= x1 then return y1 end
 	local range = x1 - x0
-	if range < 1e-6 then return y0 end
+	if range < CONST.EPSILON then return y0 end
 	local xn = (x - x0) / range
 	local t
 	local a = 1 - 2 * cxv
 	local b = 2 * cxv
-	if math_abs(a) < 1e-6 then
-		t = math_abs(b) < 1e-6 and xn or (xn / b)
+	if math_abs(a) < CONST.EPSILON then
+		t = math_abs(b) < CONST.EPSILON and xn or (xn / b)
 	else
 		local disc = b * b + 4 * a * xn
 		if disc < 0 then
@@ -1570,7 +1936,7 @@ default_curve = function(y0, y1)
 	return { y0 = y0, y1 = y1, cx = 0.5, cy = (y0 + y1) * 0.5, x0 = 0.0, x1 = 1.0 }
 end
 
-local HANDLE_R = 5.0
+local HANDLE_R = CONST.HANDLE_R
 
 -- Dragging state for curve handles { handle = "p0"|"p1"|"p2" }
 local curve_drag = nil
@@ -1592,7 +1958,7 @@ local function draw_curve_editor()
 			total_links = total_links + #m.links
 		end
 		if total_links > 0 then
-			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x555555FF)
+			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIMMER)
 			r.ImGui_Text(ctx, "  Curve Editor    select a parameter row above")
 			r.ImGui_PopStyleColor(ctx)
 		end
@@ -1611,13 +1977,13 @@ local function draw_curve_editor()
 	-- Canvas dimensions  use available width, fixed height.
 	-- Layout: [left sidebar: viewport labels] [canvas] [right sidebar: buttons]
 	local avail_w = r.ImGui_GetContentRegionAvail(ctx)
-	local LBL_COL_W = 54
-	local LBL_GAP = 6
-	local BTN_COL_W = 110
+	local LBL_COL_W = CONST.CURVE_LBL_COL_W
+	local LBL_GAP = CONST.CURVE_LBL_GAP
+	local BTN_COL_W = CONST.CURVE_BTN_COL_W
 	local CW = avail_w - LBL_COL_W - LBL_GAP - BTN_COL_W - 12
-	local CH = 180
-	local PAD = 12
-	local SEGS = 64
+	local CH = CONST.CURVE_CANVAS_HEIGHT
+	local PAD = CONST.CURVE_CANVAS_PAD
+	local SEGS = CONST.CURVE_SEGS
 
 	local dl = r.ImGui_GetWindowDrawList(ctx)
 	local ox_outer, oy = r.ImGui_GetCursorScreenPos(ctx)
@@ -1637,16 +2003,16 @@ local function draw_curve_editor()
 		return vxmin + vx * vxrange, vymin + vy * vyrange
 	end
 	-- Canvas background
-	r.ImGui_DrawList_AddRectFilled(dl, ox, oy, ox + CW, oy + CH, 0x0E1220FF)
-	r.ImGui_DrawList_AddRect(dl, ox, oy, ox + CW, oy + CH, 0x505050FF)
+	r.ImGui_DrawList_AddRectFilled(dl, ox, oy, ox + CW, oy + CH, COL.CANVAS_BG)
+	r.ImGui_DrawList_AddRect(dl, ox, oy, ox + CW, oy + CH, COL.CANVAS_BORDER)
 
 	-- Grid lines (4x4)
 	for gi = 1, 3 do
 		local gf = gi / 4
 		local gxp = ox + PAD + gf * (CW - 2 * PAD)
 		local gyp = oy + PAD + gf * (CH - 2 * PAD)
-		r.ImGui_DrawList_AddLine(dl, gxp, oy + 1, gxp, oy + CH - 1, 0x22283AFF)
-		r.ImGui_DrawList_AddLine(dl, ox + 1, gyp, ox + CW - 1, gyp, 0x22283AFF)
+		r.ImGui_DrawList_AddLine(dl, gxp, oy + 1, gxp, oy + CH - 1, COL.GRID)
+		r.ImGui_DrawList_AddLine(dl, ox + 1, gyp, ox + CW - 1, gyp, COL.GRID)
 	end
 
 	-- Optional horizontal guide line (e.g. bipolar rest line at 0.5)
@@ -1654,7 +2020,7 @@ local function draw_curve_editor()
 		local gy = lk.guide_y or 0.5
 		if gy >= vymin and gy <= vymax then
 			local _, gsy = lcs(0, gy)
-			r.ImGui_DrawList_AddLine(dl, ox + 1, gsy, ox + CW - 1, gsy, 0xFFAA0099, 1.5)
+			r.ImGui_DrawList_AddLine(dl, ox + 1, gsy, ox + CW - 1, gsy, COL.MACRO_CURSOR, 1.5)
 		end
 	end
 
@@ -1666,7 +2032,7 @@ local function draw_curve_editor()
 		local px2, py2 = lcs(x2, eval_curve(crv, x2))
 		py1 = math_max(oy, math_min(oy + CH, py1))
 		py2 = math_max(oy, math_min(oy + CH, py2))
-		r.ImGui_DrawList_AddLine(dl, px1, py1, px2, py2, 0x3A8FFFFF, 2.0)
+		r.ImGui_DrawList_AddLine(dl, px1, py1, px2, py2, COL.CURVE_LINE, 2.0)
 	end
 
 	-- Handle positions (P0 at x0, P2 at x1; P1's cx is relative to [x0,x1])
@@ -1690,8 +2056,8 @@ local function draw_curve_editor()
 	hp2y = math_max(canv_ymin, math_min(canv_ymax, hp2y))
 
 	-- Tangent guide lines
-	r.ImGui_DrawList_AddLine(dl, hp0x, hp0y, hp1x, hp1y, 0x55555588, 1.0)
-	r.ImGui_DrawList_AddLine(dl, hp1x, hp1y, hp2x, hp2y, 0x55555588, 1.0)
+	r.ImGui_DrawList_AddLine(dl, hp0x, hp0y, hp1x, hp1y, COL.TANGENT, 1.0)
+	r.ImGui_DrawList_AddLine(dl, hp1x, hp1y, hp2x, hp2y, COL.TANGENT, 1.0)
 
 	-- Current macro position indicator
 	local macro_val = mac.value
@@ -1700,8 +2066,8 @@ local function draw_curve_editor()
 	cur_sx = math_max(canv_xmin, math_min(canv_xmax, cur_sx))
 	cur_sx2 = math_max(canv_xmin, math_min(canv_xmax, cur_sx2))
 	cur_sy2 = math_max(canv_ymin, math_min(canv_ymax, cur_sy2))
-	r.ImGui_DrawList_AddLine(dl, cur_sx, oy, cur_sx, oy + CH, 0xFFAA0099, 1.5)
-	r.ImGui_DrawList_AddCircleFilled(dl, cur_sx2, cur_sy2, 5, 0xFFFFFFBB, 10)
+	r.ImGui_DrawList_AddLine(dl, cur_sx, oy, cur_sx, oy + CH, COL.MACRO_CURSOR, 1.5)
+	r.ImGui_DrawList_AddCircleFilled(dl, cur_sx2, cur_sy2, 5, COL.HANDLE_RING, 10)
 
 	-- Y-axis viewport range controls in the LEFT SIDEBAR as DragDouble widgets,
 	-- matching the style of the right-side coordinate inputs.
@@ -1716,11 +2082,7 @@ local function draw_curve_editor()
 		lk.view_ymax = math_max((lk.view_ymin or 0.0) + 0.05, math_min(1.0, new_vymax))
 	end
 	if r.ImGui_IsItemDeactivatedAfterEdit(ctx) then save_state() end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Y-axis max viewport.\nDrag or Ctrl+Click to edit.\nScroll over canvas to zoom Y.")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Y-axis max viewport.\nDrag or Ctrl+Click to edit.\nScroll over canvas to zoom Y.")
 
 	-- Bottom: vymin
 	r.ImGui_SetCursorScreenPos(ctx, ox_outer, oy + CH - PAD - lbl_h * 0.5)
@@ -1730,11 +2092,7 @@ local function draw_curve_editor()
 		lk.view_ymin = math_max(0.0, math_min((lk.view_ymax or 1.0) - 0.05, new_vymin))
 	end
 	if r.ImGui_IsItemDeactivatedAfterEdit(ctx) then save_state() end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Y-axis min viewport.\nDrag or Ctrl+Click to edit.")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Y-axis min viewport.\nDrag or Ctrl+Click to edit.")
 
 	-- X-axis viewport range controls below the canvas as DragDouble widgets.
 	local xlbl_w = 54
@@ -1750,11 +2108,7 @@ local function draw_curve_editor()
 		lk.view_xmin = math_max(0.0, math_min((lk.view_xmax or 1.0) - 0.05, new_vxmin))
 	end
 	if r.ImGui_IsItemDeactivatedAfterEdit(ctx) then save_state() end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "X-axis min viewport.\nDrag or Ctrl+Click to edit.")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("X-axis min viewport.\nDrag or Ctrl+Click to edit.")
 
 	r.ImGui_SetCursorScreenPos(ctx, xmax_lbl_x, xmax_lbl_y)
 	r.ImGui_SetNextItemWidth(ctx, xlbl_w)
@@ -1763,11 +2117,7 @@ local function draw_curve_editor()
 		lk.view_xmax = math_max((lk.view_xmin or 0.0) + 0.05, math_min(1.0, new_vxmax))
 	end
 	if r.ImGui_IsItemDeactivatedAfterEdit(ctx) then save_state() end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "X-axis max viewport.\nDrag or Ctrl+Click to edit.")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("X-axis max viewport.\nDrag or Ctrl+Click to edit.")
 
 	-- Invisible interaction area (must come before handle drawing so handles win clicks)
 	r.ImGui_SetCursorScreenPos(ctx, ox, oy)
@@ -1857,9 +2207,9 @@ local function draw_curve_editor()
 
 	-- Draw handles on top of everything
 	for hname, hpos in pairs(handles) do
-		local col = (hname == "p1") and 0xFFAA00FF or 0x3A8FFFFF
+		local col = (hname == "p1") and COL.SPARK_HOV or COL.ACCENT
 		r.ImGui_DrawList_AddCircleFilled(dl, hpos.x, hpos.y, HANDLE_R, col, 14)
-		r.ImGui_DrawList_AddCircle(dl, hpos.x, hpos.y, HANDLE_R, 0xFFFFFFBB, 14, 1.5)
+		r.ImGui_DrawList_AddCircle(dl, hpos.x, hpos.y, HANDLE_R, COL.HANDLE_RING, 14, 1.5)
 	end
 
 	-- Right-side button column
@@ -1876,11 +2226,7 @@ local function draw_curve_editor()
 		apply_macro(mac, mi)
 		save_state()
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Reset curve and axes to default linear 0\xe2\x86\x921")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Reset curve and axes to default linear 0\xe2\x86\x921")
 
 	if r.ImGui_Button(ctx, "Invert##invcrv", BTN_COL_W) then
 		crv.y0, crv.y1 = crv.y1, crv.y0
@@ -1894,9 +2240,9 @@ local function draw_curve_editor()
 	local guide_btn_w = math_floor((BTN_COL_W - 4) * 0.5)
 	local guide_drag_w = BTN_COL_W - guide_btn_w - 4
 	if lk.guide_visible then
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x8B5A00FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0xAA7000FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0xCC8500FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GUIDE_BTN)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GUIDE_HOV)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GUIDE_ACT)
 	else
 		push_btn_style()
 	end
@@ -1904,11 +2250,7 @@ local function draw_curve_editor()
 		lk.guide_visible = not lk.guide_visible
 		save_state()
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Toggle horizontal reference line\n(useful as bipolar rest marker)")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Toggle horizontal reference line\n(useful as bipolar rest marker)")
 	if lk.guide_visible then
 		r.ImGui_PopStyleColor(ctx, 3)
 	else
@@ -1983,13 +2325,13 @@ local function draw_curve_editor()
 	local bar_h = 8
 	r.ImGui_SetCursorScreenPos(ctx, ox, oy + CH + 4 + lbl_h + 12)
 	local bbx, bby = r.ImGui_GetCursorScreenPos(ctx)
-	r.ImGui_DrawList_AddRectFilled(dl, bbx, bby, bbx + bar_w, bby + bar_h, 0x1A1A2EFF, 3)
+	r.ImGui_DrawList_AddRectFilled(dl, bbx, bby, bbx + bar_w, bby + bar_h, COL.SPARK_OUTBG, 3)
 	local ev = math_max(0, math_min(1, eff_val))
-	r.ImGui_DrawList_AddRectFilled(dl, bbx, bby, bbx + ev * bar_w, bby + bar_h, 0x3A8FFFAA, 3)
-	r.ImGui_DrawList_AddRect(dl, bbx, bby, bbx + bar_w, bby + bar_h, 0x444444FF, 3)
+	r.ImGui_DrawList_AddRectFilled(dl, bbx, bby, bbx + ev * bar_w, bby + bar_h, COL.SPARK_OUTBAR, 3)
+	r.ImGui_DrawList_AddRect(dl, bbx, bby, bbx + bar_w, bby + bar_h, COL.SPARK_OUTBDR, 3)
 
 	r.ImGui_SetCursorScreenPos(ctx, ox, bby + bar_h + 4)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x666666FF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIM)
 	local bar_hint = ("Final Output: %.3f   (after modulation controls)"):format(eff_val)
 	r.ImGui_Text(ctx, bar_hint)
 	r.ImGui_PopStyleColor(ctx)
@@ -2002,19 +2344,22 @@ end
 -- Add-link button: shows last-touched FX parameter, click to link
 --
 local function draw_add_link_button()
-	local ok_lt, trnum_lt, fxnum_lt, pnum_lt = r.GetLastTouchedFX()
-	if not ok_lt then
+	-- GetTouchedOrFocusedFX supports container-nested FX (unlike legacy GetLastTouchedFX).
+	-- mode 0 = last touched; itemnumber == -1 means track FX (we don't support take FX here).
+	local ok_lt, trnum_lt, itemnum_lt, _takenum_lt, fxnum_lt, pnum_lt = r.GetTouchedOrFocusedFX(0)
+	if not ok_lt or itemnum_lt ~= -1 then
 		local avail_w = r.ImGui_GetContentRegionAvail(ctx)
 		local msg = "Touch an FX parameter to add a link"
 		local tw = r.ImGui_CalcTextSize(ctx, msg)
 		r.ImGui_SetCursorPosX(ctx, r.ImGui_GetCursorPosX(ctx) + (avail_w - tw) * 0.5)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x666666FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIM)
 		r.ImGui_Text(ctx, msg)
 		r.ImGui_PopStyleColor(ctx)
 		return
 	end
 
-	local tr_lt = trnum_lt == 0 and r.GetMasterTrack(0) or r.GetTrack(0, trnum_lt - 1)
+	-- GetTouchedOrFocusedFX track convention: -1 = master, 0+ = track index
+	local tr_lt = trnum_lt == -1 and r.GetMasterTrack(0) or r.GetTrack(0, trnum_lt)
 	if not tr_lt then
 		return
 	end
@@ -2049,15 +2394,15 @@ local function draw_add_link_button()
 	end
 
 	if already_linked then
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x3A3A3AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x4A4A4AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x3A3A3AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x888888FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.INACTIVE_BG)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.INACTIVE_HOV)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.INACTIVE_ACT)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_GREY)
 	else
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x1A6B1AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x248F24FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x2EAD2EFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFFF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GREEN_BTN)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GREEN_HOV)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GREEN_ACT)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.WHITE)
 	end
 
 		if r.ImGui_Button(ctx, preview_lbl .. "##addlnk") then
@@ -2114,11 +2459,11 @@ local function draw_filter_bar()
 	r.ImGui_SameLine(ctx)
 
 	if ui.filter_text == "" then
-		push_btn_style()
-		if ui.show_all then
-			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x285A28FF)
-		end
-		if r.ImGui_Button(ctx, ui.show_all and "All##tog" or "Sel##tog") then
+    	push_btn_style()
+    	if ui.show_all then
+    		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.TOG_ON)
+    	end
+    	if r.ImGui_Button(ctx, ui.show_all and "All##tog" or "Sel##tog") then
 			ui.show_all = not ui.show_all
 		end
 		if ui.show_all then
@@ -2151,9 +2496,9 @@ local function draw_filter_bar()
 
 	r.ImGui_SameLine(ctx)
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x8B4500FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0xAA5500FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0xCC6600FF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.AMBER_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.AMBER_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.AMBER_ACT)
 	if r.ImGui_Button(ctx, "Clear Orphans##clorphans") then
 		local removed = 0
 		for _, m in ipairs(macros) do
@@ -2183,31 +2528,24 @@ local function draw_filter_bar()
 
 	-- Learn mode toggle
 	if ui.learn_mode then
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x1A6B1AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x248F24FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x2EAD2EFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFFF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GREEN_BTN)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GREEN_HOV)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GREEN_ACT)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.WHITE)
 	else
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x3A3A3AFF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x5A4A00FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x7A6200FF)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x999999FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.INACTIVE_BG)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.LEARN_OFF_HOV)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.LEARN_OFF_ACT)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_MID)
 	end
 	if r.ImGui_Button(ctx, "Learn##learnmode") then
 		ui.learn_mode = not ui.learn_mode
 		ui.learn_last_touched = nil
 		set_status(ui.learn_mode and "Learn mode ON  touch FX parameters to link them" or "Learn mode OFF")
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(
-			ctx,
-			ui.learn_mode
-					and "Learn Mode ON: every new FX parameter touch is auto-linked\nto the selected macro. Click to stop."
-				or "Learn Mode OFF: click to auto-link touched FX parameters\nto the selected macro."
-		)
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip(ui.learn_mode
+		and "Learn Mode ON: every new FX parameter touch is auto-linked\nto the selected macro. Click to stop."
+		or "Learn Mode OFF: click to auto-link touched FX parameters\nto the selected macro.")
 	r.ImGui_PopStyleColor(ctx, 4)
 	pop_btn_style()
 end
@@ -2254,7 +2592,7 @@ local function draw_param_table()
 	end
 
 	if #rows == 0 then
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x666666FF)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIM)
 		r.ImGui_Text(ctx, using_regex and "  No parameters match." or "  No linked parameters.")
 		r.ImGui_PopStyleColor(ctx)
 		return
@@ -2335,10 +2673,10 @@ local function draw_param_table()
 			local is_row_sel = ui.selected_link and ui.selected_link.mi == mi and ui.selected_link.li == li
 			local tr = get_track_by_guid(lk.track_guid)
 			local is_muted = lk.muted == true
-			local dim_col = is_muted and 0x44444488 or nil
+			local dim_col = is_muted and COL.DIM_MUTED or nil
 
 			-- Col 0: Macro name (selectable row)
-			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and 0x3A8FFF66 or COL_ACCENT)
+			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and COL.ACCENT_DIM or COL_ACCENT)
 			if
 				r.ImGui_Selectable(
 					ctx,
@@ -2363,7 +2701,7 @@ local function draw_param_table()
 				r.ImGui_DrawList_AddRectFilled(dl, cx1, row_y, cx1 + cw, row_y + row_h, bg)
 			end
 			if not tr then
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and 0xFF6B6B55 or COL_WARN)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and COL.WARN_DIM or COL_WARN)
 				r.ImGui_Text(ctx, "[!] " .. (lk.track_name ~= "" and lk.track_name or "?"))
 				r.ImGui_PopStyleColor(ctx)
 			else
@@ -2380,7 +2718,7 @@ local function draw_param_table()
 			r.ImGui_TableSetColumnIndex(ctx, 2)
 			local fx_resolved = tr and resolve_fx_index(tr, lk) >= 0
 			if not fx_resolved then
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and 0xFF6B6B55 or COL_WARN)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), is_muted and COL.WARN_DIM or COL_WARN)
 				r.ImGui_Text(ctx, "[!] " .. (lk.fx_name ~= "" and lk.fx_name or "?"))
 				r.ImGui_PopStyleColor(ctx)
 			else
@@ -2408,7 +2746,7 @@ local function draw_param_table()
 			do
 				local crv = lk.curve
 				local bx, by = r.ImGui_GetCursorScreenPos(ctx)
-				local bw = 78
+				local bw = CONST.SPARKLINE_W
 				local bh = r.ImGui_GetTextLineHeight(ctx)
 				local pw, ph = bw - 2, bh - 2
 
@@ -2462,21 +2800,19 @@ local function draw_param_table()
 				end
 
 				local is_dnd_hovered = r.ImGui_IsItemHovered(ctx)
-				local bdr_col = is_dnd_hovered and 0xFFAA00FF or (is_row_sel and 0x3A8FFFFF or 0x333333FF)
-				r.ImGui_DrawList_AddRectFilled(dl, bx, by, bx + bw, by + bh, 0x111E2EFF, 2)
+				local bdr_col = is_dnd_hovered and COL.SPARK_HOV or (is_row_sel and COL.ACCENT or COL.SPARK_BORDER)
+				r.ImGui_DrawList_AddRectFilled(dl, bx, by, bx + bw, by + bh, COL.SPARK_BG, 2)
 				r.ImGui_DrawList_AddRect(dl, bx, by, bx + bw, by + bh, bdr_col, 2, nil, 1.0)
 
-				local segs = 20
+				local segs = CONST.SPARKLINE_SEGS
 				local lk_scale = lk.scale or 1.0
 				local lk_offset = lk.offset or 0.0
-				local lk_out_min = lk.out_min or 0.0
-				local lk_out_max = lk.out_max or 1.0
 				for s = 0, segs - 1 do
 					local x1 = s / segs
 					local x2 = (s + 1) / segs
 					local function eff(x)
 						local v = eval_curve(crv, x) * lk_scale + lk_offset
-						return math_max(lk_out_min, math_min(lk_out_max, v))
+						return math_max(0, math_min(1, v))
 					end
 					local y1s = eff(x1)
 					local y2s = eff(x2)
@@ -2484,14 +2820,14 @@ local function draw_param_table()
 					local sy1 = by + 1 + (1 - math_max(0, math_min(1, y1s))) * ph
 					local sx2 = bx + 1 + x2 * pw
 					local sy2 = by + 1 + (1 - math_max(0, math_min(1, y2s))) * ph
-					r.ImGui_DrawList_AddLine(dl, sx1, sy1, sx2, sy2, 0x3A8FFFFF, 1.0)
+					r.ImGui_DrawList_AddLine(dl, sx1, sy1, sx2, sy2, COL.CURVE_LINE, 1.0)
 				end
 
 				local tx = bx + 1 + mac.value * pw
-				r.ImGui_DrawList_AddLine(dl, tx, by + 1, tx, by + bh - 1, 0xFFFFFF66, 1.0)
+				r.ImGui_DrawList_AddLine(dl, tx, by + 1, tx, by + bh - 1, COL.SPARK_CURSOR, 1.0)
 
 				if is_dnd_hovered then
-					r.ImGui_DrawList_AddText(dl, bx + bw - 10, by, 0xFFAA00FF, "")
+					r.ImGui_DrawList_AddText(dl, bx + bw - 10, by, COL.SPARK_HOV, "")
 				end
 			end
 
@@ -2501,29 +2837,22 @@ local function draw_param_table()
 			r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + (row_h - btn_h) * 0.5 - cell_pad_y)
 			push_btn_style()
 			if is_muted then
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0xB93F54FF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0xD44A63FF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0xE05570FF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFFF)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.MUTE_BTN)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.MUTE_HOV)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.MUTE_ACT)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.WHITE)
 			else
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x2A2A2AFF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x3A3A3AFF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x4A4A4AFF)
-				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0x666666FF)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.DARK_BG)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.DARK_BG_HOV)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.DARK_BG_ACT)
+				r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_DIM)
 			end
 			if r.ImGui_Button(ctx, "M##mt") then
 				lk.muted = not lk.muted
 				apply_macro(macros[mi], mi)
 				save_state()
 			end
-			if r.ImGui_IsItemHovered(ctx) then
-				r.ImGui_BeginTooltip(ctx)
-				r.ImGui_Text(
-					ctx,
-					is_muted and "Unmute: re-enable macro control" or "Mute: freeze parameter at current value"
-				)
-				r.ImGui_EndTooltip(ctx)
-			end
+			tooltip(is_muted and "Unmute: re-enable macro control" or "Mute: freeze parameter at current value")
 			r.ImGui_PopStyleColor(ctx, 4)
 			pop_btn_style()
 
@@ -2531,7 +2860,7 @@ local function draw_param_table()
 			r.ImGui_TableSetColumnIndex(ctx, 6)
 			r.ImGui_SetCursorPosY(ctx, r.ImGui_GetCursorPosY(ctx) + (row_h - btn_h) * 0.5 - cell_pad_y)
 			push_btn_style()
-			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x5A0000FF)
+			r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.RED_DEEP)
 			if r.ImGui_Button(ctx, "X##xl") then
 				to_remove = { mi = mi, li = li }
 			end
@@ -2576,8 +2905,8 @@ local function draw_modulation_controls()
 	local gap = 16
 	local ctrl_w = math_max(80, math_floor((curve_editor_cw - scale_tw - offset_tw - 4 - gap) * 0.5))
 
-	local function labeled_drag(label, key, default, speed, lo, hi, fmt, tooltip, wheel_step)
-		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xAAAAAAAAFF)
+	local function labeled_drag(label, key, default, speed, lo, hi, fmt, ttip, wheel_step)
+		r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.TEXT_LIGHT)
 		r.ImGui_Text(ctx, label)
 		r.ImGui_PopStyleColor(ctx)
 		r.ImGui_SameLine(ctx, 0, 2)
@@ -2593,7 +2922,7 @@ local function draw_modulation_controls()
 		end
 		if r.ImGui_IsItemHovered(ctx) then
 			r.ImGui_BeginTooltip(ctx)
-			r.ImGui_Text(ctx, tooltip)
+			r.ImGui_Text(ctx, ttip)
 			r.ImGui_EndTooltip(ctx)
 			local wy = r.ImGui_GetMouseWheel(ctx)
 			if wy ~= 0 then
@@ -2663,9 +2992,9 @@ end
 local function draw_toolbar()
 	push_btn_style()
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x1A6B1AFF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x248F24FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x2EAD2EFF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GREEN_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GREEN_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GREEN_ACT)
 	if r.ImGui_Button(ctx, "✚##addmacro", 28, 28) then
 		macros[#macros + 1] = new_macro(#macros + 1)
 		-- Clear the controller slider at the new position; it may hold a
@@ -2677,11 +3006,7 @@ local function draw_toolbar()
 		set_status("Macro added")
 		save_state()
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Add a new macro")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Add a new macro")
 	r.ImGui_PopStyleColor(ctx, 3)
 
 	r.ImGui_SameLine(ctx)
@@ -2694,19 +3019,12 @@ local function draw_toolbar()
 		end
 		set_status("All macros reset to 0")
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Reset all macro knobs to zero")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Reset all macro knobs to zero")
 
 	pop_btn_style()
 
 	r.ImGui_SameLine(ctx)
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x8B0000FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0xAA0000FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0xCC0000FF)
 	r.ImGui_SameLine(ctx)
 
 	push_btn_style()
@@ -2737,20 +3055,86 @@ local function draw_toolbar()
 			set_status("No track selected")
 		end
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
+	do
 		local trname = "?"
 		if automation_track and r.ValidatePtr(automation_track, "MediaTrack*") then
 			local _, n = r.GetTrackName(automation_track)
 			trname = n
 		end
-		r.ImGui_Text(ctx, "Move JSFX to selected track\nCurrently on: " .. trname)
-		r.ImGui_EndTooltip(ctx)
+		tooltip("Move JSFX to selected track\nCurrently on: " .. trname)
 	end
 	pop_btn_style()
 
 	r.ImGui_SameLine(ctx)
 
+	push_btn_style()
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GUIDE_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GUIDE_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GUIDE_ACT)
+
+	if r.ImGui_Button(ctx, "R##rebuildslaves", 28, 28) then
+		-- 1. Tear down existing link JSFX for every link, plus
+		--    clear plink on the target. Also purge stray slave
+		--    JSFX and legacy Reamacros Links containers from
+		--    every track to catch any orphans.
+		for _, m in ipairs(macros) do
+			for _, lk in ipairs(m.links) do
+				local tr = get_track_by_guid(lk.track_guid)
+				if tr then remove_link_jsfx(tr, lk) end
+			end
+		end
+		local function purge(tr)
+			while true do
+				local target_addr = walk_all_fx(tr, function(addr)
+					local _, name = r.TrackFX_GetFXName(tr, addr, "")
+					if name and (name:find(LINK_FX_NAME, 1, true)
+						or name:find(CONTAINER_NAME, 1, true)) then
+						return addr
+					end
+				end)
+				if not target_addr then break end
+				r.TrackFX_Delete(tr, target_addr)
+			end
+		end
+		for ti = 0, r.CountTracks(0) - 1 do
+			purge(r.GetTrack(0, ti))
+		end
+		local master = r.GetMasterTrack(0)
+		if master then purge(master) end
+
+		-- 2. Reinstall every link fresh.
+		local rebuilt, failed = 0, 0
+		for mi, m in ipairs(macros) do
+			for _, lk in ipairs(m.links) do
+				local tr = get_track_by_guid(lk.track_guid)
+				if tr then
+					local idx = install_link_jsfx(tr, lk, mi)
+					if idx >= 0 then
+						rebuilt = rebuilt + 1
+					else
+						failed = failed + 1
+					end
+				else
+					failed = failed + 1
+				end
+			end
+		end
+		save_state()
+		set_status(("Rebuilt %d slave%s%s"):format(
+			rebuilt,
+			rebuilt == 1 and "" or "s",
+			failed > 0 and (" (" .. failed .. " failed)") or ""))
+	end
+
+	tooltip("Rebuild all slave link JSFX\n(delete and reinstall every link)")
+	r.ImGui_PopStyleColor(ctx, 3)
+	pop_btn_style()
+
+	r.ImGui_SameLine(ctx)
+
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.RED_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.RED_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.RED_ACT)
 	if r.ImGui_Button(ctx, "X##clralltables", 28, 28) then
 		ui.confirm = {
 			msg = "Clear all parameter links from all macros?",
@@ -2770,28 +3154,36 @@ local function draw_toolbar()
 					end
 					m.links = {}
 				end
-				-- Remove all Reamacros Links containers from all tracks
+				-- Purge any stray link JSFX (flat siblings) and legacy
+				-- Reamacros Links containers on all tracks. Walk the whole
+				-- FX tree; delete anything whose name matches LINK_FX_NAME
+				-- or CONTAINER_NAME. Re-scan after each delete since
+				-- addresses shift.
+				local function purge(tr)
+					while true do
+						local target_addr = walk_all_fx(tr, function(addr)
+							local _, name = r.TrackFX_GetFXName(tr, addr, "")
+							if name and (name:find(LINK_FX_NAME, 1, true)
+								or name:find(CONTAINER_NAME, 1, true)) then
+								return addr
+							end
+						end)
+						if not target_addr then break end
+						r.TrackFX_Delete(tr, target_addr)
+					end
+				end
 				for ti = 0, r.CountTracks(0) - 1 do
-					local tr = r.GetTrack(0, ti)
-					local cidx = find_container_on_track(tr)
-					if cidx >= 0 then r.TrackFX_Delete(tr, cidx) end
+					purge(r.GetTrack(0, ti))
 				end
 				local master = r.GetMasterTrack(0)
-				if master then
-					local cidx = find_container_on_track(master)
-					if cidx >= 0 then r.TrackFX_Delete(master, cidx) end
-				end
+				if master then purge(master) end
 				ui.selected_link = nil
 				set_status("All links cleared")
 			end,
 		}
 		r.ImGui_OpenPopup(ctx, "##confirm")
 	end
-	if r.ImGui_IsItemHovered(ctx) then
-		r.ImGui_BeginTooltip(ctx)
-		r.ImGui_Text(ctx, "Clear all parameter links from all macros")
-		r.ImGui_EndTooltip(ctx)
-	end
+	tooltip("Clear all parameter links from all macros")
 	r.ImGui_PopStyleColor(ctx, 3)
 
 	-- Status text (right-aligned on the same row)
@@ -2799,10 +3191,10 @@ local function draw_toolbar()
 	local status_col
 	if ui.status_msg ~= "" and r.time_precise() < ui.status_time then
 		status_text = ui.status_msg
-		status_col = COL_ACCENT
+		status_col = COL.ACCENT
 	else
-		status_text = SCRIPT_NAME .. " v" .. VERSION
-		status_col = 0x666666FF
+		status_text = SCRIPT_NAME .. " v" .. DISPLAY_VERSION
+		status_col = COL.TEXT_DIM
 	end
 	r.ImGui_SameLine(ctx)
 	local tw = r.ImGui_CalcTextSize(ctx, status_text)
@@ -2832,16 +3224,16 @@ local function draw_confirm_popup()
 		return
 	end
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), 0xFFFFFFFF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), COL.WHITE)
 	r.ImGui_Text(ctx, ui.confirm and ui.confirm.msg or "")
 	r.ImGui_PopStyleColor(ctx)
 
 	r.ImGui_Spacing(ctx)
 
 	push_btn_style()
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x1A6B1AFF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0x248F24FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0x2EAD2EFF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.GREEN_BTN)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.GREEN_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.GREEN_ACT)
 	if r.ImGui_Button(ctx, "Confirm", 80, 0) then
 		if ui.confirm and ui.confirm.action then
 			ui.confirm.action()
@@ -2853,9 +3245,9 @@ local function draw_confirm_popup()
 
 	r.ImGui_SameLine(ctx)
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), 0x5A0000FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), 0xAA0000FF)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), 0xCC0000FF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), COL.RED_DEEP)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), COL.RED_HOV)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), COL.RED_ACT)
 	if r.ImGui_Button(ctx, "Cancel", 80, 0) then
 		ui.confirm = nil
 		r.ImGui_CloseCurrentPopup(ctx)
@@ -2874,8 +3266,8 @@ local function draw()
 	local init_w = DEFAULT_MACROS * (KNOB_SIZE + KNOB_SPACING) - KNOB_SPACING + 20
 	r.ImGui_SetNextWindowSize(ctx, init_w, 620, r.ImGui_Cond_FirstUseEver())
 
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(), COL_HEADER)
-	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(), 0x0F3460FF)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(), COL.HEADER)
+	r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(), COL.TITLE_ACTIVE)
 	r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowPadding(), 10, 10)
 	r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing(), 8, 6)
 
@@ -2911,8 +3303,9 @@ local function poll_learn_mode()
 		return
 	end
 
-	local ok, trnum, fxnum, pnum = r.GetLastTouchedFX()
-	if not ok then
+	-- GetTouchedOrFocusedFX supports container-nested FX (unlike legacy GetLastTouchedFX).
+	local ok, trnum, itemnum, _takenum, fxnum, pnum = r.GetTouchedOrFocusedFX(0)
+	if not ok or itemnum ~= -1 then
 		return
 	end
 
@@ -2922,12 +3315,12 @@ local function poll_learn_mode()
 		return
 	end
 
-	-- Resolve the track
+	-- Resolve the track (GetTouchedOrFocusedFX: -1 = master, 0+ = track index)
 	local tr
-	if trnum == 0 then
+	if trnum == -1 then
 		tr = r.GetMasterTrack(0)
 	else
-		tr = r.GetTrack(0, trnum - 1)
+		tr = r.GetTrack(0, trnum)
 	end
 	if not tr then
 		return
@@ -3024,38 +3417,47 @@ local function init()
 	sync_all_to_fx()
 	resolve_all_link_jsfx()
 
-	-- Migration: install link JSFX for links that have none yet,
-	-- and migrate legacy top-level link JSFX into containers.
+	-- Migration: ensure every link has a functional link JSFX installed
+	-- as a flat sibling of its target. Handles three cases:
+	--   (a) no link JSFX at all (fresh install)
+	--   (b) legacy: link JSFX inside a Reamacros Links container
+	--   (c) flat sibling already present (just verify/reinstall if stale)
 	for mi, mac in ipairs(macros) do
 		for _, lk in ipairs(mac.links) do
 			local tr = get_track_by_guid(lk.track_guid)
 			if not tr then goto next_migration end
 
-			if lk.link_fx_idx == nil and lk.container_fx_idx == nil then
-				-- No link JSFX at all; install fresh (inside container)
-				install_link_jsfx(tr, lk, mi)
-			elseif lk.container_fx_idx == nil and lk.link_fx_idx ~= nil then
-				-- Legacy: link JSFX is at the top level, migrate into container
-				-- Remove the old top-level instance
-				local old_fx = lk.link_fx_idx
-				-- Clear plink on target before moving
+			if lk.container_fx_idx ~= nil and lk.link_fx_idx ~= nil then
+				-- Legacy container placement: remove and reinstall flat.
 				local target_fx = resolve_fx_index(tr, lk)
 				if target_fx >= 0 then
 					r.TrackFX_SetNamedConfigParm(
 						tr, target_fx,
 						("param.%d.plink.active"):format(lk.param), "0")
 				end
-				r.TrackFX_Delete(tr, old_fx)
-				lk.link_fx_idx = nil
-				-- Install fresh inside container
-				install_link_jsfx(tr, lk, mi)
-			elseif lk.link_fx_idx == nil then
-				-- Container was resolved but the link JSFX inside could not
-				-- be located (externally deleted, GUID mismatch, etc.).
-				-- Reinstall; install_link_jsfx will reuse the existing container.
+				local fx_addr = get_container_item_address(
+					tr, lk.container_fx_idx, lk.link_fx_idx)
+				if fx_addr then r.TrackFX_Delete(tr, fx_addr) end
+				-- Delete container if empty
+				local cnt = get_container_count(tr, lk.container_fx_idx)
+				if cnt == 0 then
+					r.TrackFX_Delete(tr, lk.container_fx_idx)
+				end
 				lk.container_fx_idx = nil
+				lk.link_fx_idx = nil
 				lk.container_param = nil
 				install_link_jsfx(tr, lk, mi)
+			elseif lk.link_fx_idx == nil then
+				-- No link JSFX; install fresh.
+				install_link_jsfx(tr, lk, mi)
+			else
+				-- Flat sibling already present; verify it's reachable.
+				local addr = get_link_fx_address(tr, lk)
+				if not addr then
+					-- Stale; reinstall fresh.
+					lk.link_fx_idx = nil
+					install_link_jsfx(tr, lk, mi)
+				end
 			end
 
 			::next_migration::

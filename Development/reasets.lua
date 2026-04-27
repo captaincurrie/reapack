@@ -1,5 +1,5 @@
 -- @description reasets - REAper track-SETS manager
--- @version 1.8
+-- @version 1.9
 -- @author captaincurrie
 -- @license GNU General Public License
 -- @date 2026-03-13
