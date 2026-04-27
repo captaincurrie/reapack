@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="CaptainCurrie" commit="d3c39f6a694b2ad433b8db7556294e0a94e01603">
+<index version="1" name="CaptainCurrie" commit="f3a233f38361d58261bfba515e2ff025b4c264ab">
   <category name="Development">
     <reapack name="reamacros.lua" type="script" desc="reamacros - REAper MACROS">
       <metadata>
@@ -13,6 +13,9 @@
       </metadata>
       <version name="1.1" author="captaincurrie" time="2026-04-18T17:10:26Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reamacros.lua</source>
+      </version>
+      <version name="1.2" author="captaincurrie" time="2026-04-18T17:10:28Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/f3a233f38361d58261bfba515e2ff025b4c264ab/Development/reamacros.lua</source>
       </version>
     </reapack>
     <reapack name="reasets.lua" type="script" desc="reasets - REAper track-SETS manager">
@@ -46,6 +49,9 @@
       <version name="1.7" author="captaincurrie" time="2026-04-18T17:10:26Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reasets.lua</source>
       </version>
+      <version name="1.8" author="captaincurrie" time="2026-04-18T17:10:28Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/f3a233f38361d58261bfba515e2ff025b4c264ab/Development/reasets.lua</source>
+      </version>
     </reapack>
     <reapack name="reatask.lua" type="script" desc="reatask - reaper task manager">
       <metadata>
@@ -74,6 +80,9 @@
       </version>
       <version name="1.7" author="captaincurrie" time="2026-04-18T17:10:26Z">
         <source main="main">https://github.com/captaincurrie/reapack/raw/d3c39f6a694b2ad433b8db7556294e0a94e01603/Development/reatask.lua</source>
+      </version>
+      <version name="1.8" author="captaincurrie" time="2026-04-18T17:10:28Z">
+        <source main="main">https://github.com/captaincurrie/reapack/raw/f3a233f38361d58261bfba515e2ff025b4c264ab/Development/reatask.lua</source>
       </version>
     </reapack>
   </category>
